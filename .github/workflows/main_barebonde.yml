@@ -53,10 +53,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
-
+    
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
@@ -68,13 +65,6 @@ jobs:
           unzip release.zip
           rm release.zip
         
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_88FB9A8FD1A34B1C9A6833699F0FF28D }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5FF1066E64E24D179072228417A7D155 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_894B4E62677347DB85D1FDE218595133 }}
-
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
         id: deploy-to-function
@@ -82,4 +72,4 @@ jobs:
           app-name: 'barebonde'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_EE5938EB2A4D40EB9AFCD67F9AE75B6C }}
