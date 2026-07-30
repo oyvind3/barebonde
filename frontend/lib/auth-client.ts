@@ -27,10 +27,8 @@ interface AuthError {
 class AuthClient {
   private apiClient: AxiosInstance;
   private sessionToken: string | null = null;
-  private baseURL: string;
 
   constructor(apiBaseURL: string = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") {
-    this.baseURL = apiBaseURL;
     this.apiClient = axios.create({
       baseURL: `${apiBaseURL}/api`,
     });
