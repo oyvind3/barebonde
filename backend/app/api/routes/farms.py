@@ -1,17 +1,18 @@
 """
-Farm management routes
+Farm management routes using Cosmos DB
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Header, status
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from azure.cosmos import exceptions
+import logging
 
-from app.db.database import get_db
-from app.db.models import User, Farm, FarmUser, UserRole
-from app.core.security import get_current_user, verify_farm_owner
+from app.db.cosmos_client import get_farms_container, get_farm_users_container
+from app.db.cosmos_models import Farm, FarmUser, UserRole
+from app.services.better_auth_service import better_auth_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -25,32 +26,26 @@ class FarmCreateRequest(BaseModel):
 
 class FarmResponse(BaseModel):
     """Response model for farm"""
-    id: int
+    id: str
     name: str
     org_number: str
     address: Optional[str]
     municipality: Optional[str]
-    
-    class Config:
-        from_attributes = True
 
 
 @router.post("")
 async def create_farm(
     request: FarmCreateRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    authorization: Optional[str] = Header(None)
 ) -> FarmResponse:
     """
     Create a new farm
     
     The authenticated user becomes the owner of the farm.
-    In production, also creates an organization in better-auth.com.
     
     Args:
         request: Farm creation details
-        current_user: Authenticated user
-        db: Database session
+        authorization: Bearer token from header
     
     Returns:
         Created farm details
@@ -58,48 +53,82 @@ async def create_farm(
     Raises:
         HTTPException: If org_number already exists or invalid
     """
-    # Validate org_number doesn't already exist
-    stmt = select(Farm).where(Farm.org_number == request.org_number)
-    existing_farm = await db.scalar(stmt)
-    
-    if existing_farm:
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Denne organisasjonsnummeret er allerede registrert"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header"
         )
+    
+    session_token = authorization.replace("Bearer ", "")
+    
+    # Verify session
+    session_data = await better_auth_service.verify_session(session_token)
+    if not session_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session"
+        )
+    
+    better_auth_user_id = session_data.get("user_id")
+    user_details = await better_auth_service.get_user(better_auth_user_id)
+    if not user_details:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not retrieve user details"
+        )
+    
+    # Get or create local user
+    user = await better_auth_service.create_or_get_user_local(user_details)
+    
+    # Validate org_number doesn't already exist
+    farms_container = get_farms_container()
+    try:
+        query = f"SELECT * FROM farms f WHERE f.org_number = '{request.org_number}'"
+        items = list(farms_container.query_items(
+            query=query,
+            enable_cross_partition_query=True
+        ))
+        
+        if items:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Denne organisasjonsnummeret er allerede registrert"
+            )
+    except exceptions.CosmosHttpResponseError as e:
+        logger.error(f"Error checking existing farm: {e}")
     
     try:
         # Create farm
         farm = Farm(
             name=request.name,
             org_number=request.org_number,
-            address=request.address or "",
-            municipality=request.municipality or ""
+            address=request.address,
+            municipality=request.municipality
         )
-        db.add(farm)
-        await db.flush()
+        
+        # Save to Cosmos DB
+        farms_container.upsert_item(farm.to_dict())
+        logger.info(f"Created farm: {farm.id} - {request.name}")
         
         # Add current user as owner
+        farm_users_container = get_farm_users_container()
         farm_user = FarmUser(
-            user_id=current_user.id,
+            user_id=user.id,
             farm_id=farm.id,
             role=UserRole.OWNER
         )
-        db.add(farm_user)
+        farm_users_container.upsert_item(farm_user.to_dict())
         
-        # TODO: Create organization in better-auth.com
-        # from app.services.better_auth_service import better_auth_service
-        # org_data = await better_auth_service.create_organization(
-        #     current_user.better_auth_id,
-        #     name=request.name,
-        #     metadata={"org_number": request.org_number, "farm_id": farm.id}
-        # )
-        
-        await db.commit()
-        return FarmResponse.from_orm(farm)
+        return FarmResponse(
+            id=farm.id,
+            name=farm.name,
+            org_number=farm.org_number,
+            address=farm.address,
+            municipality=farm.municipality
+        )
     
     except Exception as e:
-        await db.rollback()
+        logger.error(f"Error creating farm: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Feil ved opprettelse av gård: {str(e)}"
@@ -108,17 +137,15 @@ async def create_farm(
 
 @router.get("/{farm_id}")
 async def get_farm(
-    farm_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    farm_id: str,
+    authorization: Optional[str] = Header(None)
 ) -> FarmResponse:
     """
     Get farm details (requires access to farm)
     
     Args:
         farm_id: The farm ID
-        current_user: Authenticated user
-        db: Database session
+        authorization: Bearer token from header
     
     Returns:
         Farm details
@@ -126,16 +153,75 @@ async def get_farm(
     Raises:
         HTTPException: If farm not found or user doesn't have access
     """
-    # Verify access
-    await verify_farm_owner(farm_id, current_user, db)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header"
+        )
     
-    stmt = select(Farm).where(Farm.id == farm_id)
-    farm = await db.scalar(stmt)
+    session_token = authorization.replace("Bearer ", "")
     
-    if not farm:
+    # Verify session
+    session_data = await better_auth_service.verify_session(session_token)
+    if not session_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session"
+        )
+    
+    better_auth_user_id = session_data.get("user_id")
+    user_details = await better_auth_service.get_user(better_auth_user_id)
+    if not user_details:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not retrieve user details"
+        )
+    
+    # Get or create local user
+    user = await better_auth_service.create_or_get_user_local(user_details)
+    
+    # Verify user has access to farm
+    farm_users_container = get_farm_users_container()
+    try:
+        query = f"SELECT * FROM farm_users fu WHERE fu.user_id = '{user.id}' AND fu.farm_id = '{farm_id}'"
+        access_items = list(farm_users_container.query_items(
+            query=query,
+            enable_cross_partition_query=True
+        ))
+        
+        if not access_items:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Du har ikke tilgang til denne gården"
+            )
+    except exceptions.CosmosHttpResponseError as e:
+        logger.error(f"Error checking farm access: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Feil ved sjekk av gårdtilgang"
+        )
+    
+    # Get farm
+    farms_container = get_farms_container()
+    try:
+        farm_item = farms_container.read_item(item=farm_id, partition_key="")
+        farm = Farm.from_dict(farm_item)
+        
+        return FarmResponse(
+            id=farm.id,
+            name=farm.name,
+            org_number=farm.org_number,
+            address=farm.address,
+            municipality=farm.municipality
+        )
+    except exceptions.CosmosResourceNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Gården ble ikke funnet"
         )
-    
-    return FarmResponse.from_orm(farm)
+    except Exception as e:
+        logger.error(f"Error getting farm: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Feil ved henting av gård"
+        )

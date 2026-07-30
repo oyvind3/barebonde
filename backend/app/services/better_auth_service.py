@@ -1,6 +1,7 @@
 """
 Better Auth integration service
 Provides authentication and user management via better-auth.com
+Uses Cosmos DB for local user and farm data
 
 Email Configuration (Plunk):
 - Sign up at https://plunk.com
@@ -20,11 +21,15 @@ Email Configuration (Plunk):
 from typing import Optional, Dict, Any
 import httpx
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from azure.cosmos import exceptions
 
 from app.core.config import settings
-from app.db.models import User, FarmUser, Farm
+from app.db.cosmos_client import (
+    get_users_container,
+    get_farms_container,
+    get_farm_users_container
+)
+from app.db.cosmos_models import User, Farm, FarmUser, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +60,8 @@ class BetterAuthService:
                 response = await client.post(
                     f"{self.base_url}/sessions/verify",
                     headers=self.headers,
-                    json={"token": session_token}
+                    json={"token": session_token},
+                    timeout=10.0
                 )
                 
                 if response.status_code == 200:
@@ -81,7 +87,8 @@ class BetterAuthService:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{self.base_url}/users/{user_id}",
-                    headers=self.headers
+                    headers=self.headers,
+                    timeout=10.0
                 )
                 
                 if response.status_code == 200:
@@ -107,7 +114,8 @@ class BetterAuthService:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{self.base_url}/users/{user_id}/organizations",
-                    headers=self.headers
+                    headers=self.headers,
+                    timeout=10.0
                 )
                 
                 if response.status_code == 200:
@@ -145,7 +153,8 @@ class BetterAuthService:
                         "name": name,
                         "metadata": metadata or {},
                         "owner_id": user_id
-                    }
+                    },
+                    timeout=10.0
                 )
                 
                 if response.status_code == 201:
@@ -182,7 +191,8 @@ class BetterAuthService:
                     json={
                         "email": email,
                         "role": role
-                    }
+                    },
+                    timeout=10.0
                 )
                 
                 if response.status_code == 201:
@@ -213,7 +223,8 @@ class BetterAuthService:
             async with httpx.AsyncClient() as client:
                 response = await client.delete(
                     f"{self.base_url}/organizations/{organization_id}/members/{user_id}",
-                    headers=self.headers
+                    headers=self.headers,
+                    timeout=10.0
                 )
                 
                 return response.status_code == 200
@@ -223,14 +234,12 @@ class BetterAuthService:
     
     async def create_or_get_user_local(
         self,
-        db: AsyncSession,
         better_auth_user_data: Dict[str, Any]
     ) -> User:
         """
-        Create or retrieve local user from database
+        Create or retrieve local user from Cosmos DB
         
         Args:
-            db: Database session
             better_auth_user_data: User data from better-auth.com
         
         Returns:
@@ -241,15 +250,26 @@ class BetterAuthService:
         first_name = better_auth_user_data.get("name", "").split()[0] if better_auth_user_data.get("name") else ""
         last_name = " ".join(better_auth_user_data.get("name", "").split()[1:]) if better_auth_user_data.get("name") else ""
         
-        # Try to get existing user
-        stmt = select(User).where(User.email == email)
-        existing_user = await db.scalar(stmt)
+        users_container = get_users_container()
         
-        if existing_user:
-            # Update better_auth_id if needed
-            if not existing_user.better_auth_id:
-                existing_user.better_auth_id = better_auth_id
-            return existing_user
+        try:
+            # Try to get existing user by email using SQL query
+            query = f"SELECT * FROM users u WHERE u.email = '{email}'"
+            items = list(users_container.query_items(
+                query=query,
+                enable_cross_partition_query=True
+            ))
+            
+            if items:
+                existing_user = User.from_dict(items[0])
+                # Update better_auth_id if needed
+                if not existing_user.better_auth_id:
+                    existing_user.better_auth_id = better_auth_id
+                    # Update in Cosmos DB
+                    users_container.upsert_item(existing_user.to_dict())
+                return existing_user
+        except exceptions.CosmosHttpResponseError as e:
+            logger.warning(f"Error querying user: {e}")
         
         # Create new user
         new_user = User(
@@ -259,60 +279,64 @@ class BetterAuthService:
             last_name=last_name,
             is_active=True
         )
-        db.add(new_user)
-        await db.flush()
+        
+        # Upsert in Cosmos DB
+        users_container.upsert_item(new_user.to_dict())
+        logger.info(f"Created new user: {email}")
         
         return new_user
     
     async def sync_farm_membership(
         self,
-        db: AsyncSession,
         user: User,
         better_auth_orgs: list[Dict[str, Any]]
     ) -> None:
         """
-        Sync better-auth.com organization membership with local farm_users table
+        Sync better-auth.com organization membership with local farm_users collection
         
         Args:
-            db: Database session
             user: Local User instance
             better_auth_orgs: Organizations from better-auth.com API
         """
+        farm_users_container = get_farm_users_container()
+        
         # Map better-auth roles to local roles
         role_mapping = {
-            "owner": "owner",
-            "admin": "manager",
-            "member": "staff"
+            "owner": UserRole.OWNER,
+            "admin": UserRole.MANAGER,
+            "member": UserRole.STAFF
         }
         
         for org in better_auth_orgs:
             org_id = org.get("id")
             better_auth_role = org.get("role", "member")
-            local_role = role_mapping.get(better_auth_role, "staff")
+            local_role = role_mapping.get(better_auth_role, UserRole.STAFF)
             
-            # Try to find corresponding farm by org_id stored in metadata
-            # For now, assuming 1:1 mapping - org_id == farm_id (will need adjustment)
-            stmt = select(FarmUser).where(
-                FarmUser.user_id == user.id,
-                FarmUser.farm_id == int(org_id)
-            )
-            farm_user = await db.scalar(stmt)
-            
-            if not farm_user:
-                # Create farm_user if it doesn't exist
-                farm_user = FarmUser(
-                    user_id=user.id,
-                    farm_id=int(org_id),
-                    role=local_role
-                )
-                db.add(farm_user)
-            else:
-                # Update role if different
-                if farm_user.role != local_role:
-                    farm_user.role = local_role
-        
-        await db.flush()
+            try:
+                # Query for existing farm_user
+                query = f"SELECT * FROM farm_users fu WHERE fu.user_id = '{user.id}' AND fu.farm_id = '{org_id}'"
+                items = list(farm_users_container.query_items(
+                    query=query,
+                    enable_cross_partition_query=True
+                ))
+                
+                if items:
+                    # Update existing
+                    farm_user_data = items[0]
+                    farm_user_data["role"] = local_role.value
+                    farm_users_container.upsert_item(farm_user_data)
+                else:
+                    # Create new
+                    farm_user = FarmUser(
+                        user_id=user.id,
+                        farm_id=org_id,
+                        role=local_role
+                    )
+                    farm_users_container.upsert_item(farm_user.to_dict())
+            except exceptions.CosmosHttpResponseError as e:
+                logger.error(f"Error syncing farm membership: {e}")
 
 
 # Create singleton instance
 better_auth_service = BetterAuthService()
+

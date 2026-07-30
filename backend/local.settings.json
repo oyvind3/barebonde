@@ -1,0 +1,23 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "FUNCTIONS_EXTENSION_VERSION": "~4",
+    "COSMOS_DB_CONNECTION_STRING": "AccountEndpoint=https://barebonde.documents.azure.com:443/;AccountKey=YOUR_KEY_HERE;",
+    "COSMOS_DB_DATABASE_ID": "barebonde",
+    "BETTER_AUTH_API_KEY": "your_better_auth_api_key_from_dashboard",
+    "BETTER_AUTH_BASE_URL": "https://api.better-auth.com/v1",
+    "PLUNK_SECRET_API_KEY": "sk_your_secret_api_key_from_plunk_dashboard",
+    "PLUNK_PUBLIC_API_KEY": "pk_your_public_api_key_from_plunk_dashboard",
+    "JWT_SECRET_KEY": "your-super-secret-key-change-in-production",
+    "JWT_ALGORITHM": "HS256",
+    "API_PORT": "8000",
+    "API_HOST": "0.0.0.0",
+    "ENV": "development",
+    "FRONTEND_URL": "http://localhost:3000"
+  },
+  "Host": {
+    "LocalHttpPort": 7071
+  }
+}

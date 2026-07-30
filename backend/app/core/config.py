@@ -9,10 +9,12 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """
     Application settings loaded from environment variables
+    Cosmos DB configuration for serverless deployment
     """
     
-    # Database
-    database_url: str
+    # Cosmos DB (Azure Cosmos DB connection string)
+    cosmos_db_connection_string: str
+    cosmos_db_database_id: str = "barebonde"
     
     # Better Auth
     better_auth_api_key: str

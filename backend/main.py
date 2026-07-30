@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.api.routes import auth, health, farms
-from app.db.database import init_db
+from app.db.cosmos_client import init_cosmos_db
 
 
 @asynccontextmanager
@@ -19,7 +19,8 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     print(f"Starting Barebonde API - Environment: {settings.env}")
-    await init_db()
+    print("Initializing Cosmos DB...")
+    await init_cosmos_db()
     
     yield
     
