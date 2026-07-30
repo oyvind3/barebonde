@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback, useContext, createContext } from "react";
 import { useRouter } from "next/navigation";
-import { authClient, type UserData, type SessionData } from "@/lib/auth-client";
+import { authClient, type UserData } from "@/lib/auth-client";
 
 interface AuthContextType {
   user: UserData | null;
