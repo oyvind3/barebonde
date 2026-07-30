@@ -1,6 +1,6 @@
 """
 Barebonde Backend - FastAPI main entry point
-Landbruksplattform for norske bønder og små landbruksforetak
+Landbruksplattform for norske bønder og små landbruksforetak i norge
 """
 
 from fastapi import FastAPI
