@@ -2,16 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 export default function Home() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
-  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
     // Check if user is logged in
     const checkAuth = async () => {
-      const token = localStorage.getItem('access_token')
+      const token = localStorage.getItem('session_token')
       if (token) {
         // User is logged in - redirect to dashboard
         router.push('/dashboard')
@@ -24,12 +24,8 @@ export default function Home() {
 
   const handleLogin = async () => {
     try {
-      const response = await fetch('/api/auth/login')
-      const data = await response.json()
-      // Redirect to ID-porten
-      if (data.login_url) {
-        window.location.href = data.login_url
-      }
+      // Redirect to better-auth.com login
+      window.location.href = 'https://dashboard.better-auth.com/login'
     } catch (error) {
       console.error('Login error:', error)
     }
@@ -63,13 +59,18 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="text-center">
-          <button
-            onClick={handleLogin}
-            className="bg-farm-green text-white px-8 py-3 rounded-lg text-lg font-semibold hover:bg-opacity-90 transition"
-          >
-            Logg inn med ID-porten
-          </button>
+        <div className="text-center space-y-4">
+          <div>
+            <button
+              onClick={handleLogin}
+              className="bg-farm-green text-white px-8 py-3 rounded-lg text-lg font-semibold hover:bg-opacity-90 transition"
+            >
+              Logg inn eller registrer deg
+            </button>
+          </div>
+          <p className="text-gray-500 text-sm">
+            Du vil bli omdirigert til sikker innlogging
+          </p>
         </div>
       </div>
     </main>

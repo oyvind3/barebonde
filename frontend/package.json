@@ -12,7 +12,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "next": "^14.0.0",
-    "next-auth": "^4.24.0",
+    "@better-auth/client": "^1.0.0",
     "@tanstack/react-query": "^5.0.0",
     "axios": "^1.6.0",
     "typescript": "^5.2.0",
