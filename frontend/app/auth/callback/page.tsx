@@ -23,7 +23,7 @@ export default function AuthCallback() {
         }
 
         // Send callback to backend
-        const session = await authClient.handleCallback(sessionToken)
+        await authClient.handleCallback(sessionToken)
         
         // Redirect to farm setup if first login, otherwise dashboard
         router.push('/farm/setup')
