@@ -47,7 +47,7 @@ class User(Base):
     
     id = Column(Integer, primary_key=True)
     email = Column(String(255), unique=True, nullable=False)
-    id_porten_id = Column(String(255), unique=True, nullable=False)  # ID-porten user ID
+    better_auth_id = Column(String(255), unique=True, nullable=False)  # better-auth user ID
     first_name = Column(String(255))
     last_name = Column(String(255))
     is_active = Column(Boolean, default=True)

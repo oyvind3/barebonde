@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.api.routes import auth, health
+from app.api.routes import auth, health, farms
 from app.db.database import init_db
 
 
@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for startup and shutdown events
     """
     # Startup
-    print(f"Starting Barebonde API - Environment: {settings.ENV}")
+    print(f"Starting Barebonde API - Environment: {settings.env}")
     await init_db()
     
     yield
@@ -37,7 +37,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,6 +46,7 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(farms.router, prefix="/api/farms", tags=["Farms"])
 
 
 @app.get("/")

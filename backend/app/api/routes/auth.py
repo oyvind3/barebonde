@@ -1,83 +1,150 @@
 """
-Authentication routes for ID-porten OAuth2 flow
+Authentication routes using better-auth.com
 """
 
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import timedelta
+from pydantic import BaseModel
 
 from app.db.database import get_db
-from app.services.auth_service import AuthService
-from app.schemas.auth import (
-    TokenResponse, 
-    UserResponse,
-    LoginCallbackRequest,
-)
-
+from app.db.models import User
+from app.core.security import get_current_user
+from app.services.better_auth_service import better_auth_service
+from app.schemas.auth import UserResponse
 
 router = APIRouter()
-auth_service = AuthService()
+
+
+class CallbackRequest(BaseModel):
+    """Request body for auth callback"""
+    code: str
+    session_token: Optional[str] = None
+
+
+class VerifyResponse(BaseModel):
+    """Response for session verification"""
+    user: UserResponse
+    session_valid: bool
 
 
 @router.get("/login")
-async def login():
+async def get_login_url():
     """
-    Initiate ID-porten login flow
-    Returns: URL to redirect user to ID-porten
+    Get the better-auth.com login/signup URL
+    
+    Returns:
+        URL for frontend to redirect user to
     """
-    login_url = auth_service.get_id_porten_login_url()
-    return {"login_url": login_url}
+    # In a real implementation, this would generate a proper URL
+    # For now, return the better-auth.com hosted auth page
+    return {
+        "login_url": "https://dash.better-auth.com/sign-in",
+        "note": "Configure your better-auth.com project URL here"
+    }
 
 
 @router.post("/callback")
-async def login_callback(
-    request: LoginCallbackRequest,
+async def auth_callback(
+    request: CallbackRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Handle ID-porten callback after successful authentication
+    Handle auth callback from better-auth.com
+    
+    The frontend will send the session token returned from better-auth.com
+    We verify it and create/sync the local user entry
     
     Args:
-        request: Contains authorization code from ID-porten
+        request: Contains session token from better-auth.com
         db: Database session
     
     Returns:
-        Access token, refresh token, and user info
+        User info and session status
     """
-    try:
-        # Exchange code for token
-        token_response = await auth_service.exchange_code_for_token(request.code)
-        
-        # Get user info from ID-porten
-        user_info = await auth_service.get_user_info(token_response.access_token)
-        
-        # Create or get user in database
-        user = await auth_service.create_or_get_user(db, user_info)
-        
-        # Generate JWT tokens
-        access_token = auth_service.create_access_token(user)
-        refresh_token = await auth_service.create_refresh_token(db, user)
-        
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_type="bearer",
-            user=UserResponse.from_orm(user)
+    if not request.session_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_token is required"
         )
     
-    except Exception as e:
+    # Verify session with better-auth.com
+    session_data = await better_auth_service.verify_session(request.session_token)
+    if not session_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {str(e)}"
+            detail="Invalid session token"
         )
+    
+    # Get full user details from better-auth.com
+    better_auth_user_id = session_data.get("user_id")
+    user_details = await better_auth_service.get_user(better_auth_user_id)
+    if not user_details:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not retrieve user details"
+        )
+    
+    # Create or get local user
+    user = await better_auth_service.create_or_get_user_local(db, user_details)
+    
+    # Fetch user's organizations and sync to local farm_users
+    organizations = await better_auth_service.get_organizations(better_auth_user_id)
+    if organizations:
+        await better_auth_service.sync_farm_membership(db, user, organizations)
+    
+    await db.commit()
+    
+    return {
+        "user": UserResponse.from_orm(user),
+        "session_token": request.session_token,
+        "token_type": "bearer"
+    }
 
 
-@router.post("/refresh")
-async def refresh_token(
-    refresh_token: str,
+@router.post("/verify")
+async def verify_session(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
+    Verify current session and return user info
+    
+    Args:
+        current_user: Current authenticated user from session verification
+        db: Database session
+    
+    Returns:
+        User details if session is valid
+    """
+    return {
+        "user": UserResponse.from_orm(current_user),
+        "session_valid": True
+    }
+
+
+@router.post("/logout")
+async def logout(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Logout the current user
+    
+    Note: The actual session invalidation happens on the frontend
+    by clearing the session token. This endpoint is mainly for
+    backend cleanup if needed.
+    
+    Args:
+        current_user: Current authenticated user
+    
+    Returns:
+        Success message
+    """
+    # Clear session cache for this user
+    from app.core.security import clear_session_cache
+    clear_session_cache()
+    
+    return {"message": "Successfully logged out"}
     Refresh access token using refresh token
     """
     try:
