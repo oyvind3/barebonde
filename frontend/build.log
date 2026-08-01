@@ -1,0 +1,18 @@
+
+> barebonde-frontend@0.1.0 build /Users/oyvind/development/barebonde/frontend
+> next build
+
+sh: next: command not found
+npm ERR! code ELIFECYCLE
+npm ERR! syscall spawn
+npm ERR! file sh
+npm ERR! errno ENOENT
+npm ERR! barebonde-frontend@0.1.0 build: `next build`
+npm ERR! spawn ENOENT
+npm ERR! 
+npm ERR! Failed at the barebonde-frontend@0.1.0 build script.
+npm ERR! This is probably not a problem with npm. There is likely additional logging output above.
+npm WARN Local package.json exists, but node_modules missing, did you mean to install?
+
+npm ERR! A complete log of this run can be found in:
+npm ERR!     /Users/oyvind/.npm/_logs/2026-08-01T18_09_07_295Z-debug.log
