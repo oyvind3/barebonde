@@ -3,6 +3,9 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
+import { Navbar } from '@/components/navigation/Navbar'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 
 interface FarmFormData {
   name: string
@@ -34,14 +37,12 @@ export default function FarmSetupPage() {
     setError(null)
 
     try {
-      // Validate org_number (Norwegian format: 9 digits)
       if (!/^\d{9}$/.test(formData.org_number)) {
         setError('Organisasjonsnummeret må være 9 sifre')
         setLoading(false)
         return
       }
 
-      // Create farm via backend
       await axios.post(
         `${API_BASE_URL}/api/farms`,
         {
@@ -50,7 +51,6 @@ export default function FarmSetupPage() {
         }
       )
 
-      // Redirect to dashboard
       router.push('/dashboard')
     } catch (err: any) {
       if (err.response?.status === 409) {
@@ -66,64 +66,77 @@ export default function FarmSetupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-farm-light to-white py-12 px-4">
-      <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold text-farm-green mb-2 text-center">
-          Velkommen!
-        </h1>
-        <p className="text-gray-600 text-center mb-8">
-          Oppsett av din gård
-        </p>
+    <div className="min-h-screen bg-gradient-to-b from-[#f3f2fb] via-[#f8f7fd] to-white flex flex-col font-sans">
+      <Navbar />
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-            {error}
-          </div>
-        )}
+      <main className="flex-grow py-16 px-4">
+        <div className="max-w-xl mx-auto">
+          <Card hoverEffect={false} className="p-8 sm:p-12 border border-gray-200">
+            <div className="text-center mb-8">
+              <span className="text-xs font-bold uppercase tracking-widest text-[#43468b] bg-[#e8e7f8] px-3 py-1 mb-3 inline-block">
+                Prøveversjon
+              </span>
+              <h1 className="text-3xl sm:text-4xl font-serif text-gray-900 mb-2">
+                Registrer din gård
+              </h1>
+              <p className="text-gray-600 text-sm">
+                Fyll inn gårdsnavn og organisasjonsnummer for å komme i gang.
+              </p>
+            </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
-              Navn på gården *
-            </label>
-            <input
-              type="text"
-              id="name"
-              name="name"
-              value={formData.name}
-              onChange={handleInputChange}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-farm-green focus:border-transparent"
-              placeholder="f.eks. Solbakken Gård"
-            />
-          </div>
+            {error && (
+              <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 text-sm mb-6">
+                {error}
+              </div>
+            )}
 
-          <div>
-            <label htmlFor="org_number" className="block text-sm font-medium text-gray-700 mb-2">
-              Organisasjonsnummer *
-            </label>
-            <input
-              type="text"
-              id="org_number"
-              name="org_number"
-              value={formData.org_number}
-              onChange={handleInputChange}
-              required
-              maxLength={9}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-farm-green focus:border-transparent"
-              placeholder="9 siffer (f.eks. 123456789)"
-            />
-          </div>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div>
+                <label htmlFor="name" className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-2">
+                  Gårdsnavn *
+                </label>
+                <input
+                  type="text"
+                  id="name"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full px-4 py-3 border border-gray-300 rounded-none focus:outline-none focus:ring-2 focus:ring-[#43468b] text-sm"
+                  placeholder="f.eks. Solbakken Gård"
+                />
+              </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-farm-green text-white py-3 rounded-lg font-semibold hover:bg-opacity-90 transition disabled:opacity-50"
-          >
-            {loading ? 'Oppretter gård...' : 'Opprett gård'}
-          </button>
-        </form>
-      </div>
+              <div>
+                <label htmlFor="org_number" className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-2">
+                  Organisasjonsnummer *
+                </label>
+                <input
+                  type="text"
+                  id="org_number"
+                  name="org_number"
+                  value={formData.org_number}
+                  onChange={handleInputChange}
+                  required
+                  maxLength={9}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-none focus:outline-none focus:ring-2 focus:ring-[#43468b] text-sm"
+                  placeholder="9 siffer (f.eks. 123456789)"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={loading}
+                variant="primary"
+                fullWidth
+                showArrow
+              >
+                {loading ? 'OPPRETTER GÅRD...' : 'FORTSETT TIL DASHBOARD'}
+              </Button>
+            </form>
+          </Card>
+        </div>
+      </main>
     </div>
   )
 }
