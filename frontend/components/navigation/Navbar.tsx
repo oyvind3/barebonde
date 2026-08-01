@@ -22,22 +22,13 @@ export const Navbar: React.FC = () => {
 
           {/* Navigation Links */}
           <nav className="hidden lg:flex items-center space-x-8 text-sm font-medium text-stone-700">
-            <div className="relative group cursor-pointer py-2">
-              <span className="flex items-center hover:text-bonde-green transition-colors">
-                Funksjoner <span className="ml-1 text-xs">∨</span>
-              </span>
-            </div>
-            <div className="relative group cursor-pointer py-2">
-              <span className="flex items-center hover:text-bonde-green transition-colors">
-                Regnskap & MVA <span className="ml-1 text-xs">∨</span>
-              </span>
-            </div>
-            <div className="relative group cursor-pointer py-2">
-              <span className="flex items-center hover:text-bonde-green transition-colors">
-                Integrasjoner <span className="ml-1 text-xs">∨</span>
-              </span>
-            </div>
-            <Link href="#" className="hover:text-bonde-green transition-colors py-2">
+            <Link href="#funksjoner" className="hover:text-bonde-green transition-colors py-2">
+              Funksjoner
+            </Link>
+            <Link href="#regnskap" className="hover:text-bonde-green transition-colors py-2">
+              Regnskap
+            </Link>
+            <Link href="#priser" className="hover:text-bonde-green transition-colors py-2">
               Priser
             </Link>
           </nav>
