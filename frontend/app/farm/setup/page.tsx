@@ -140,36 +140,3 @@ export default function FarmSetupPage() {
     </div>
   )
 }
-            </label>
-            <input
-              type="text"
-              id="org_number"
-              name="org_number"
-              value={formData.org_number}
-              onChange={handleInputChange}
-              required
-              placeholder="9 sifre (f.eks. 123456789)"
-              maxLength={9}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-farm-green focus:border-transparent font-mono"
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              Du finner dette på Brønnøysundregistrene eller skattemelding
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-farm-green text-white py-3 rounded-lg font-semibold hover:bg-opacity-90 transition disabled:opacity-50"
-          >
-            {loading ? 'Oppretter gård...' : 'Opprett gård'}
-          </button>
-        </form>
-
-        <p className="text-sm text-gray-500 text-center mt-8">
-          Du kan legge til flere gårder og invitere teammedlemmer senere
-        </p>
-      </div>
-    </div>
-  )
-}
