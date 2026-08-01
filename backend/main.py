@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.api.routes import auth, health, farms
+from app.api.routes import health, farms
 from app.db.cosmos_client import init_cosmos_db
 
 
