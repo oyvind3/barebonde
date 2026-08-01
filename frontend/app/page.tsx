@@ -9,7 +9,7 @@ import { InteractivePreview } from '@/components/ui/InteractivePreview'
 
 export default function Home() {
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#f3f2fb] via-[#f8f7fd] to-white font-sans text-gray-900">
+    <div className="min-h-screen flex flex-col bg-bonde-oat font-sans text-stone-900">
       {/* Top Navigation */}
       <Navbar />
 
@@ -21,12 +21,13 @@ export default function Home() {
             Norsk Landbruksplattform
           </Badge>
 
-          <h1 className="text-4xl sm:text-6xl md:text-7xl font-serif text-gray-900 font-normal tracking-tight leading-tight mb-8">
-            Se gårdens regnskap og verditall
+          <h1 className="text-4xl sm:text-6xl md:text-7xl font-serif text-stone-900 font-normal tracking-tight leading-tight mb-8">
+            Mindre papirarbeid. <br className="hidden sm:inline" />
+            <span className="text-bonde-green italic">Mer tid til gården.</span>
           </h1>
 
-          <p className="text-lg sm:text-xl md:text-2xl text-gray-700 max-w-3xl mx-auto font-sans font-normal leading-relaxed mb-10">
-            Ikke gå inn i gårdsoppgjøret i blinde. Se hva regnskapet, avtalene og fristene krever før du beslutter.
+          <p className="text-lg sm:text-xl md:text-2xl text-stone-700 max-w-3xl mx-auto font-sans font-normal leading-relaxed mb-10">
+            Enkel regnskapsføring, automatiske offentlige frister og eSignering av forpaktningsavtaler — alt skreddersydd for norske gardsbruk.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-16">
@@ -48,7 +49,7 @@ export default function Home() {
             <Badge variant="purple" className="mb-3">
               Interaktiv Forhåndsvisning
             </Badge>
-            <h2 className="text-3xl sm:text-4xl font-serif text-gray-900">
+            <h2 className="text-3xl sm:text-4xl font-serif text-stone-900">
               Innsikt og kontroll på sekunder
             </h2>
           </div>
@@ -57,22 +58,22 @@ export default function Home() {
         </section>
 
         {/* Feature Overview Section */}
-        <section className="py-20 px-4 max-w-7xl mx-auto border-t border-gray-100">
+        <section className="py-20 px-4 max-w-7xl mx-auto border-t border-stone-200/60">
           <div className="text-center mb-16">
             <Badge variant="purple" className="mb-3">
-              Full kontroll på gården
+              Full oversikt på gården
             </Badge>
-            <h2 className="text-3xl sm:text-5xl font-serif text-gray-900 mt-2">
+            <h2 className="text-3xl sm:text-5xl font-serif text-stone-900 mt-2">
               Alt du trenger på én plattform
             </h2>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
             <Card>
-              <div className="text-3xl mb-4">💰</div>
-              <h3 className="text-xl font-bold font-serif mb-3 text-gray-900">Regnskap & Bilag</h3>
-              <p className="text-gray-600 text-sm leading-relaxed mb-6">
-                Automatisk håndtering av landbruksspesifikke MVA-satser, bilagsføring og oversikt over inntekter og utgifter.
+              <div className="w-12 h-12 rounded-xl bg-bonde-light flex items-center justify-center text-2xl mb-5 text-bonde-green">🌱</div>
+              <h3 className="text-xl font-bold font-serif mb-3 text-stone-900">Regnskap & Landbruks-MVA</h3>
+              <p className="text-stone-600 text-sm leading-relaxed mb-6">
+                Automatisk tolking av bilag fra Felleskjøpet og Tine. Direkte MVA-rapportering skreddersydd for primærnæring.
               </p>
               <Button href="/farm/setup" variant="outline" showArrow>
                 LES MER
@@ -80,10 +81,10 @@ export default function Home() {
             </Card>
 
             <Card>
-              <div className="text-3xl mb-4">📄</div>
-              <h3 className="text-xl font-bold font-serif mb-3 text-gray-900">Avtaler & Signering</h3>
-              <p className="text-gray-600 text-sm leading-relaxed mb-6">
-                Digitaliser forpaktningsavtaler, maskinleie og leverandørkontrakter med trygg digital eSignering.
+              <div className="w-12 h-12 rounded-xl bg-amber-100/80 flex items-center justify-center text-2xl mb-5 text-bonde-earth">📜</div>
+              <h3 className="text-xl font-bold font-serif mb-3 text-stone-900">Avtaler & BankID Signering</h3>
+              <p className="text-stone-600 text-sm leading-relaxed mb-6">
+                Enkelt oppsett og eSignering av forpaktningsavtaler, maskinleie og leiekjøring direkte på mobilen.
               </p>
               <Button href="/farm/setup" variant="outline" showArrow>
                 LES MER
@@ -91,10 +92,10 @@ export default function Home() {
             </Card>
 
             <Card>
-              <div className="text-3xl mb-4">⏰</div>
-              <h3 className="text-xl font-bold font-serif mb-3 text-gray-900">Offentlige Frister</h3>
-              <p className="text-gray-600 text-sm leading-relaxed mb-6">
-                Automatisk varsling for produksjonstilskudd, mva-meldinger og skattefrister rett til din kalender.
+              <div className="w-12 h-12 rounded-xl bg-emerald-100/80 flex items-center justify-center text-2xl mb-5 text-emerald-800">🚜</div>
+              <h3 className="text-xl font-bold font-serif mb-3 text-stone-900">Offentlige Søknader & Frister</h3>
+              <p className="text-stone-600 text-sm leading-relaxed mb-6">
+                Full kalendersynk for produksjonstilskudd, avløsertilskudd og kommunale jordlovssøknader.
               </p>
               <Button href="/farm/setup" variant="outline" showArrow>
                 LES MER
@@ -105,19 +106,22 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-white py-12 border-t border-gray-800 text-sm">
+      <footer className="bg-bonde-dark text-stone-200 py-12 border-t border-stone-800 text-sm">
         <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center space-x-3">
-            <span className="bg-white text-black font-bold px-3 py-1 text-xs uppercase">Barebonde</span>
-            <span className="text-gray-400">© 2026 Barebonde AS. Norsk landbruksplattform.</span>
+            <span className="bg-bonde-green text-white font-bold px-3 py-1 text-xs uppercase rounded">🌱 Barebonde</span>
+            <span className="text-stone-400">© 2026 Barebonde AS. Enkel og varm landbruksplattform.</span>
           </div>
-          <div className="flex space-x-6 text-gray-400">
+          <div className="flex space-x-6 text-stone-400">
             <a href="#" className="hover:text-white transition">Vilkår</a>
             <a href="#" className="hover:text-white transition">Personvern</a>
             <a href="#" className="hover:text-white transition">Kontakt oss</a>
           </div>
         </div>
       </footer>
+    </div>
+  )
+}
     </div>
   )
 }

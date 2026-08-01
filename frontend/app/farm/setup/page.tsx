@@ -66,33 +66,33 @@ export default function FarmSetupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#f3f2fb] via-[#f8f7fd] to-white flex flex-col font-sans">
+    <div className="min-h-screen bg-bonde-oat flex flex-col font-sans">
       <Navbar />
 
       <main className="flex-grow py-16 px-4">
         <div className="max-w-xl mx-auto">
-          <Card hoverEffect={false} className="p-8 sm:p-12 border border-gray-200">
+          <Card hoverEffect={false} className="p-8 sm:p-12 border border-stone-200/80 rounded-2xl shadow-card">
             <div className="text-center mb-8">
-              <span className="text-xs font-bold uppercase tracking-widest text-[#43468b] bg-[#e8e7f8] px-3 py-1 mb-3 inline-block">
-                Prøveversjon
+              <span className="text-xs font-bold uppercase tracking-widest text-bonde-green bg-bonde-light px-3 py-1 rounded-full mb-3 inline-block">
+                Demonavigasjon
               </span>
-              <h1 className="text-3xl sm:text-4xl font-serif text-gray-900 mb-2">
+              <h1 className="text-3xl sm:text-4xl font-serif text-stone-900 mb-2">
                 Registrer din gård
               </h1>
-              <p className="text-gray-600 text-sm">
+              <p className="text-stone-600 text-sm">
                 Fyll inn gårdsnavn og organisasjonsnummer for å komme i gang.
               </p>
             </div>
 
             {error && (
-              <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 text-sm mb-6">
+              <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-800 p-4 text-sm rounded-r-lg mb-6">
                 {error}
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label htmlFor="name" className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-2">
+                <label htmlFor="name" className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
                   Gårdsnavn *
                 </label>
                 <input
@@ -102,13 +102,13 @@ export default function FarmSetupPage() {
                   value={formData.name}
                   onChange={handleInputChange}
                   required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-none focus:outline-none focus:ring-2 focus:ring-[#43468b] text-sm"
+                  className="w-full px-4 py-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bonde-green text-sm bg-white"
                   placeholder="f.eks. Solbakken Gård"
                 />
               </div>
 
               <div>
-                <label htmlFor="org_number" className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-2">
+                <label htmlFor="org_number" className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
                   Organisasjonsnummer *
                 </label>
                 <input
@@ -119,7 +119,7 @@ export default function FarmSetupPage() {
                   onChange={handleInputChange}
                   required
                   maxLength={9}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-none focus:outline-none focus:ring-2 focus:ring-[#43468b] text-sm"
+                  className="w-full px-4 py-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bonde-green text-sm bg-white"
                   placeholder="9 siffer (f.eks. 123456789)"
                 />
               </div>

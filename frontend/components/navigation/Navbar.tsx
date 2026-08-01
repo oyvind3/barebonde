@@ -7,40 +7,37 @@ export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
-    <header className="w-full bg-white border-b border-gray-100 sticky top-0 z-50">
+    <header className="w-full bg-white/95 backdrop-blur-md border-b border-stone-200/80 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-20">
         {/* Left: Brand Logo & Title */}
         <div className="flex items-center space-x-8">
           <Link href="/" className="flex items-center space-x-3 group">
-            <span className="bg-black text-white px-3 py-1.5 font-bold text-lg tracking-wider uppercase">
-              Barebonde
+            <span className="bg-bonde-green text-white px-3.5 py-1.5 font-bold text-lg tracking-wider uppercase rounded-md shadow-xs flex items-center gap-1.5">
+              <span>🌱</span> Barebonde
             </span>
-            <span className="text-sm font-semibold text-gray-800 hidden sm:inline-block">
-              Bedrift
+            <span className="text-xs font-bold tracking-widest text-bonde-earth uppercase bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200/60 hidden sm:inline-block">
+              Landbruk
             </span>
           </Link>
 
           {/* Navigation Links */}
-          <nav className="hidden lg:flex items-center space-x-8 text-sm font-medium text-gray-700">
+          <nav className="hidden lg:flex items-center space-x-8 text-sm font-medium text-stone-700">
             <div className="relative group cursor-pointer py-2">
-              <span className="flex items-center hover:text-gray-900">
-                Produkter <span className="ml-1 text-xs">∨</span>
+              <span className="flex items-center hover:text-bonde-green transition-colors">
+                Funksjoner <span className="ml-1 text-xs">∨</span>
               </span>
             </div>
             <div className="relative group cursor-pointer py-2">
-              <span className="flex items-center hover:text-gray-900">
-                Bruksområder <span className="ml-1 text-xs">∨</span>
+              <span className="flex items-center hover:text-bonde-green transition-colors">
+                Regnskap & MVA <span className="ml-1 text-xs">∨</span>
               </span>
             </div>
             <div className="relative group cursor-pointer py-2">
-              <span className="flex items-center hover:text-gray-900">
-                Innsikt <span className="ml-1 text-xs">∨</span>
+              <span className="flex items-center hover:text-bonde-green transition-colors">
+                Integrasjoner <span className="ml-1 text-xs">∨</span>
               </span>
             </div>
-            <Link href="#" className="hover:text-gray-900 py-2">
-              Kontakt
-            </Link>
-            <Link href="#" className="hover:text-gray-900 py-2">
+            <Link href="#" className="hover:text-bonde-green transition-colors py-2">
               Priser
             </Link>
           </nav>
@@ -50,13 +47,13 @@ export const Navbar: React.FC = () => {
         <div className="hidden sm:flex items-center space-x-6">
           <Link
             href="/farm/setup"
-            className="text-xs font-bold uppercase tracking-wider text-gray-900 hover:text-gray-600 transition"
+            className="text-xs font-bold uppercase tracking-wider text-stone-800 hover:text-bonde-green transition"
           >
             LOGG INN
           </Link>
           <Link
             href="/farm/setup"
-            className="bg-[#43468b] hover:bg-[#34376f] text-white text-xs font-bold uppercase tracking-wider px-5 py-2.5 transition shadow-sm"
+            className="bg-bonde-green hover:bg-bonde-sage text-white text-xs font-bold uppercase tracking-wider px-5 py-2.5 rounded-lg transition shadow-xs"
           >
             PRØV GRATIS
           </Link>

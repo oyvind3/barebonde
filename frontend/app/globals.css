@@ -7,9 +7,9 @@ html {
 }
 
 body {
-  @apply bg-white text-gray-900;
+  @apply bg-bonde-oat text-gray-900;
 }
 
 a {
-  @apply text-farm-green hover:underline;
+  @apply text-bonde-green hover:underline;
 }
