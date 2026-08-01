@@ -6,7 +6,6 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from app.core.security import get_current_user
 from app.services.better_auth_service import better_auth_service
 from app.db.cosmos_models import User
 
