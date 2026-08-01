@@ -10,8 +10,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Sync client for initialization
-client = CosmosClient.from_connection_string(settings.cosmos_db_connection_string)
+# Create the client during application startup, not function indexing.
+client = None
 
 # Database and container instances
 database = None
@@ -31,11 +31,12 @@ async def init_cosmos_db():
     Initialize Cosmos DB database and containers
     Creates database and containers if they don't exist
     """
-    global database, users_container, farms_container, farm_users_container
+    global client, database, users_container, farms_container, farm_users_container
     global properties_container, transactions_container, documents_container
     global contracts_container, deadlines_container, audit_logs_container
     
     try:
+        client = CosmosClient.from_connection_string(settings.cosmos_db_connection_string)
         # Get or create database
         database = client.get_database_client(settings.cosmos_db_database_id)
         logger.info(f"✅ Connected to Cosmos DB database: {settings.cosmos_db_database_id}")
