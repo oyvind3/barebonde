@@ -4,6 +4,8 @@ import { Navbar } from '@/components/navigation/Navbar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatsBar } from '@/components/ui/StatsBar'
+import { Badge } from '@/components/ui/Badge'
+import { InteractivePreview } from '@/components/ui/InteractivePreview'
 
 export default function Home() {
   return (
@@ -15,6 +17,10 @@ export default function Home() {
       <main className="flex-grow">
         {/* Hero Section */}
         <section className="pt-20 pb-16 md:pt-28 md:pb-24 px-4 text-center max-w-5xl mx-auto">
+          <Badge variant="purple" className="mb-6">
+            Norsk Landbruksplattform
+          </Badge>
+
           <h1 className="text-4xl sm:text-6xl md:text-7xl font-serif text-gray-900 font-normal tracking-tight leading-tight mb-8">
             Se gårdens regnskap og verditall
           </h1>
@@ -28,7 +34,7 @@ export default function Home() {
               PRØV GRATIS
             </Button>
             <Button href="/dashboard" variant="secondary" showArrow fullWidth>
-              SE VIDEO
+              SE DEMO
             </Button>
           </div>
         </section>
@@ -36,12 +42,26 @@ export default function Home() {
         {/* Social Proof Stats Bar */}
         <StatsBar />
 
+        {/* Interactive Platform Preview Showcase */}
+        <section className="py-16 px-4 max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <Badge variant="purple" className="mb-3">
+              Interaktiv Forhåndsvisning
+            </Badge>
+            <h2 className="text-3xl sm:text-4xl font-serif text-gray-900">
+              Innsikt og kontroll på sekunder
+            </h2>
+          </div>
+
+          <InteractivePreview />
+        </section>
+
         {/* Feature Overview Section */}
-        <section className="py-20 px-4 max-w-7xl mx-auto">
+        <section className="py-20 px-4 max-w-7xl mx-auto border-t border-gray-100">
           <div className="text-center mb-16">
-            <span className="text-xs font-bold uppercase tracking-widest text-[#43468b] bg-[#e8e7f8] px-3 py-1 mb-4 inline-block">
+            <Badge variant="purple" className="mb-3">
               Full kontroll på gården
-            </span>
+            </Badge>
             <h2 className="text-3xl sm:text-5xl font-serif text-gray-900 mt-2">
               Alt du trenger på én plattform
             </h2>
