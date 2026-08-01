@@ -4,7 +4,6 @@ import { Navbar } from '@/components/navigation/Navbar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatsBar } from '@/components/ui/StatsBar'
-import { Badge } from '@/components/ui/Badge'
 import { InteractivePreview } from '@/components/ui/InteractivePreview'
 
 export default function Home() {
