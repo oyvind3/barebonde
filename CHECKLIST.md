@@ -1,6 +1,13 @@
 # Barebonde - Implementation Checklist
 
-## ✅ Foundation (This Session)
+## ✅ Live Azure Environment Setup
+
+### Deployment & Infrastructure
+- [x] Azure Static Web App configured and live
+- [x] Azure Function App (Flex Consumption) configured and live
+- [x] Azure Cosmos DB (NoSQL) database & containers setup
+- [x] GitHub Actions automated CI/CD for frontend & backend
+- [x] Open Demo Mode enabled for initial evaluation
 
 ### Strategic Planning
 - [x] Product analysis and competitive positioning
@@ -12,92 +19,37 @@
 - [x] Revenue model selected (subscription per farm)
 
 ### Architecture
-- [x] Technology stack selected and justified (7 ADRs documented)
+- [x] Technology stack selected and justified
 - [x] Multi-tenant architecture designed
-- [x] Authentication flow mapped (ID-porten → JWT)
+- [x] Future ID-porten B2C auth roadmap defined
 - [x] Domain model created (Farm as central entity)
-- [x] Database schema designed (12 tables)
-- [x] Integration priorities set (ID-porten → Peppol → Offentlige)
 - [x] Security model defined (row-level isolation + audit logs)
 
-### Backend (FastAPI + Python)
+### Backend (FastAPI + Python + Azure Functions)
 - [x] Project structure scaffolded
-- [x] SQLAlchemy ORM models defined
-- [x] Database models created (users, farms, farm_users, tokens, properties)
-- [x] FastAPI app initialized
-- [x] Authentication service built (ID-porten flow structure)
-- [x] JWT token logic implemented (create, verify, refresh)
-- [x] API routes defined (auth, health)
+- [x] Cosmos DB client & ORM models initialized
+- [x] FastAPI app initialized on Azure Function App
+- [x] API routes defined (farms, health)
 - [x] CORS configured
-- [x] Environment configuration setup
 - [x] Dependencies and requirements.txt ready
-- [x] .gitignore created
 
 ### Frontend (Next.js + React + TypeScript)
-- [x] Next.js project initialized
+- [x] Next.js static export build configured
 - [x] Tailwind CSS configured
-- [x] Login page created (brand + login button)
-- [x] Dashboard skeleton created (metrics placeholders)
-- [x] Layout structure created
-- [x] Global styles defined
+- [x] Landing page created (Demo mode entry)
+- [x] Farm setup page created
+- [x] Dashboard view created
 - [x] TypeScript configuration
-- [x] Environment setup
-- [x] .gitignore created
-- [x] package.json with all dependencies
-
-### Database (PostgreSQL)
-- [x] Schema designed (12 tables)
-- [x] Users and authentication tables
-- [x] Multi-tenant structure (farm_users with roles)
-- [x] Accounting tables (transactions - Phase 2 ready)
-- [x] Document management tables (Phase 2 ready)
-- [x] Deadline tracking tables (Phase 2 ready)
-- [x] Audit logging table
-- [x] Indexes for performance
-- [x] Enums for roles and types
-
-### Documentation
-- [x] README.md with vision and quick-start
-- [x] IMPLEMENTATION.md with setup instructions
-- [x] STATUS_REPORT.md (this session summary)
-- [x] SPRINT_PLAN.md (next 1-2 weeks detailed)
-- [x] adr.md (7 Architecture Decision Records)
-- [x] schema.sql (complete database documentation)
-- [x] Database design guide (tables and relationships)
 
 ---
 
-## 🟡 Phase 1.1: Authentication (This Week/Next Sprint)
+## 🟡 Phase 1.1: Core Features (In Progress)
 
-### Must Complete Before Phase 2
-- [ ] ID-porten credentials obtained (CLIENT_ID, SECRET)
-- [ ] OAuth2 token exchange implemented (real, not placeholder)
-- [ ] JWT token verification working
-- [ ] Multi-tenant middleware implemented
-- [ ] Frontend login flow end-to-end
-- [ ] Farm creation endpoint working
-- [ ] Permission checks enforced
-- [ ] Logout and token revocation working
-- [ ] Unit tests for auth service (80%+ coverage)
-- [ ] Manual end-to-end test (login → farm creation → dashboard)
+- [ ] Brønnøysundregistrene (BRREG) organization lookup integration
+- [ ] Expense & Revenue transaction entry
+- [ ] Tax & agricultural deadline tracker
+- [ ] Contract & document management (eSignering / Peppol)
 
-### Optional (Phase 1.2)
-- [ ] BRREG organization lookup
-- [ ] Multi-user invitation flow
-- [ ] Role-based dashboard customization
-
----
-
-## ⚪ Phase 2: Core Features (Weeks 3-8)
-
-### Accounting
-- [ ] Transaction CRUD endpoints
-- [ ] Category auto-classification
-- [ ] Dashboard with expense overview
-- [ ] Monthly/yearly reports
-- [ ] MOMs handling
-
-### Documents & Contracts
 - [ ] Document upload endpoint
 - [ ] Document versioning
 - [ ] Contract creation

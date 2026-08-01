@@ -1,39 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 export default function Home() {
-  const router = useRouter()
-  const [isLoading, setIsLoading] = useState(true)
-
-  useEffect(() => {
-    // Check if user is logged in
-    const checkAuth = async () => {
-      const token = localStorage.getItem('session_token')
-      if (token) {
-        // User is logged in - redirect to dashboard
-        router.push('/dashboard')
-      }
-      setIsLoading(false)
-    }
-
-    checkAuth()
-  }, [router])
-
-  const handleLogin = async () => {
-    try {
-      // Redirect to better-auth.com login
-      window.location.href = 'https://dashboard.better-auth.com/login'
-    } catch (error) {
-      console.error('Login error:', error)
-    }
-  }
-
-  if (isLoading) {
-    return <div className="flex items-center justify-center min-h-screen">Laster...</div>
-  }
-
   return (
     <main className="min-h-screen bg-gradient-to-br from-farm-light to-white">
       <div className="max-w-4xl mx-auto px-4 py-16">
@@ -60,15 +29,15 @@ export default function Home() {
 
         <div className="text-center space-y-4">
           <div>
-            <button
-              onClick={handleLogin}
-              className="bg-farm-green text-white px-8 py-3 rounded-lg text-lg font-semibold hover:bg-opacity-90 transition"
+            <Link
+              href="/farm/setup"
+              className="inline-block bg-farm-green text-white px-8 py-3 rounded-lg text-lg font-semibold hover:bg-opacity-90 transition"
             >
-              Logg inn eller registrer deg
-            </button>
+              Start prøveversjon (Demo)
+            </Link>
           </div>
           <p className="text-gray-500 text-sm">
-            Du vil bli omdirigert til sikker innlogging
+            Åpen demo-modus — Ingen innlogging kreves nå
           </p>
         </div>
       </div>

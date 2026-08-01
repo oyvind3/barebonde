@@ -15,14 +15,10 @@ class Settings(BaseSettings):
     # Cosmos DB (Azure Cosmos DB connection string)
     cosmos_db_connection_string: str
     cosmos_db_database_id: str = "barebonde"
-    
-    # Better Auth
-    better_auth_api_key: str
-    better_auth_base_url: str = "https://api.better-auth.com/v1"
-    
-    # Email (Plunk) - Optional, configured in better-auth.com dashboard
-    plunk_secret_api_key: str = ""  # Secret key for server-side (better-auth uses this)
-    plunk_public_api_key: str = ""  # Public key for client-side (if needed)
+
+    # Email (Plunk) - Optional
+    plunk_secret_api_key: str = ""
+    plunk_public_api_key: str = ""
     
     # JWT (still used for API tokens if needed, but better-auth handles sessions)
     jwt_secret_key: str

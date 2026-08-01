@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/hooks/useAuth'
 import axios from 'axios'
 
 interface FarmFormData {
@@ -14,23 +13,12 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export default function FarmSetupPage() {
   const router = useRouter()
-  const { user, isAuthenticated } = useAuth()
   const [formData, setFormData] = useState<FarmFormData>({
     name: '',
     org_number: '',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  if (!isAuthenticated) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600">Du må være innlogget</h1>
-        </div>
-      </div>
-    )
-  }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -53,25 +41,12 @@ export default function FarmSetupPage() {
         return
       }
 
-      // Get session token
-      const sessionToken = localStorage.getItem('session_token')
-      if (!sessionToken) {
-        setError('Sesjonen din har utløpt. Logg inn på nytt.')
-        router.push('/')
-        return
-      }
-
       // Create farm via backend
       await axios.post(
         `${API_BASE_URL}/api/farms`,
         {
           name: formData.name,
           org_number: formData.org_number,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${sessionToken}`,
-          },
         }
       )
 
@@ -94,7 +69,7 @@ export default function FarmSetupPage() {
     <div className="min-h-screen bg-gradient-to-br from-farm-light to-white py-12 px-4">
       <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-8">
         <h1 className="text-3xl font-bold text-farm-green mb-2 text-center">
-          Velkommen, {user?.first_name || user?.email}!
+          Velkommen!
         </h1>
         <p className="text-gray-600 text-center mb-8">
           Oppsett av din gård
@@ -118,6 +93,40 @@ export default function FarmSetupPage() {
               value={formData.name}
               onChange={handleInputChange}
               required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-farm-green focus:border-transparent"
+              placeholder="f.eks. Solbakken Gård"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="org_number" className="block text-sm font-medium text-gray-700 mb-2">
+              Organisasjonsnummer *
+            </label>
+            <input
+              type="text"
+              id="org_number"
+              name="org_number"
+              value={formData.org_number}
+              onChange={handleInputChange}
+              required
+              maxLength={9}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-farm-green focus:border-transparent"
+              placeholder="9 siffer (f.eks. 123456789)"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-farm-green text-white py-3 rounded-lg font-semibold hover:bg-opacity-90 transition disabled:opacity-50"
+          >
+            {loading ? 'Oppretter gård...' : 'Opprett gård'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
               placeholder="f.eks. Smiths gård"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-farm-green focus:border-transparent"
             />

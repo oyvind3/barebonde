@@ -1,102 +1,37 @@
 # Barebonde Implementation - Status Report
 
-**Date:** July 30, 2026  
-**Phase:** 1 - Foundation  
-**Status:** ✅ Architectural Setup Complete → 🟡 Ready for Development
+**Date:** August 1, 2026  
+**Phase:** 1 - Foundation & Live Azure Demo  
+**Status:** ✅ Live Azure Deployment Complete (Open Demo Mode)
 
 ---
 
 ## 📊 Summary of Work Completed
 
-### ✅ Strategic Planning (Session 1)
-- Comprehensive product analysis of 8 epics
-- Refined product strategy (standalone accounting platform vs integration layer)
-- Identified MVP scope (6 months reduced to aggressive 3-month target)
-- Created prioritized phase structure
-- Defined key riskos and mitigation strategies
-- **Deliverable:** Detailed product plan in `docs/` folder
+### ✅ Azure Production Deployment
+- **Frontend App:** Live on Azure Static Web Apps (`https://salmon-ocean-076260203.7.azurestaticapps.net`) using Next.js 14 static export.
+- **Backend Service:** Live on Azure Functions Flex Consumption (`https://barebonde-ebf2byfnesgzaqgn.norwayeast-01.azurewebsites.net`) using Python 3.14 + FastAPI.
+- **Database:** Azure Cosmos DB NoSQL container (`barebonde` database, `farms` / `farm_users` containers).
+- **CI/CD Workflows:** Automated GitHub Actions workflows for Static Web App (`.github/workflows/azure-static-web-apps-salmon-ocean-076260203.yml`) and Function App (`.github/workflows/backend-azure-functions.yml`).
 
-### ✅ Technical Stack Decisions
-- **Backend:** Python + FastAPI (async, good for numerical computing)
-- **Frontend:** Next.js (fullstack React flexibility)
-- **Database:** PostgreSQL (ACID compliance for accounting)
-- **Hosting:** Azure Nord-Europa (Norwegian data residency)
-- **Authentication:** ID-porten OAuth2 + JWT tokens
-- **Team:** Solo/1-2 developers
-- **Timeline:** 3 months to MVP
-- **Deliverable:** Architecture Decision Records (ADR) in `docs/architecture/adr.md`
+### ✅ Simplified Architecture & Demo Strategy
+- Removed complex third-party authentication dependency (Better Auth Dash) to ensure immediate runtime stability and seamless testing.
+- Switched backend to an **Open Demo Mode** for farm creation and management.
+- Preserved long-term authentication roadmap: **ID-porten + OAuth2 / JWT** as specified in copilot instructions.
 
-### ✅ Project Structure Created
+### ✅ Technical Stack Adjustments
+- **Backend:** Python 3.14 + FastAPI + Azure Functions v4 programming model (`AsgiFunctionApp`).
+- **Database:** Azure Cosmos DB NoSQL SDK (`azure-cosmos`). Connection string configured securely in Azure App Settings.
+- **Frontend:** Next.js 14 static HTML/JS export with Tailwind CSS and Axios.
+- **Hosting:** Azure Norway East / Northern Europe.
 
-```
-backend/
-├── app/
-│   ├── api/routes/          # HTTP endpoints (auth, health)
-│   ├── db/                  # SQLAlchemy models (users, farms, permissions)
-│   ├── services/            # Business logic (AuthService, future: BrregService)
-│   ├── schemas/             # Pydantic request/response models
-│   └── core/                # Config, security
-├── main.py                  # FastAPI app entry
-├── requirements.txt         # Python dependencies
-└── .env.example             # Environment template
+---
 
-frontend/
-├── app/                      # Next.js App Router pages
-│   ├── page.tsx             # Login page (partial)
-│   ├── dashboard/           # Dashboard skeleton
-│   ├── layout.tsx           # Root layout
-│   └── globals.css          # Tailwind styles
-├── package.json             # Dependencies
-├── next.config.js           # Next.js configuration
-└── tailwind.config.ts       # Tailwind CSS config
+## 🚀 Live Endpoints
+- **Frontend:** `https://salmon-ocean-076260203.7.azurestaticapps.net`
+- **Backend Health:** `https://barebonde-ebf2byfnesgzaqgn.norwayeast-01.azurewebsites.net/health`
+- **Farms API:** `https://barebonde-ebf2byfnesgzaqgn.norwayeast-01.azurewebsites.net/api/farms`
 
-docs/
-├── architecture/
-│   └── adr.md               # 7 Architecture Decision Records
-├── database/
-│   └── schema.sql           # PostgreSQL schema (12 tables)
-├── IMPLEMENTATION.md        # Setup guide and status tracker
-├── SPRINT_PLAN.md           # Detailed next sprint tasks
-├── SYSTEM_DESIGN.md         # To be created
-└── product-vision.md        # Product strategy
-```
-
-### ✅ Database Schema (PostgreSQL)
-Created 12 core tables:
-- `users` — User accounts via ID-porten
-- `refresh_tokens` — Token lifecycle management
-- `farms` — Central entity (gård)
-- `farm_users` — Multi-tenant relationships + roles
-- `properties` — Land/eiendom owned by farms
-- `transactions` — Income/Expense records (Phase 2)
-- `documents` — File storage metadata (Phase 2)
-- `contracts` — Agreements (Phase 2)
-- `deadlines` — Frister for tax, agriculture, legal (Phase 2)
-- `audit_logs` — Compliance and security tracking
-
-**Deliverable:** `docs/database/schema.sql`
-
-### ✅ Backend Implementation (Phase 1 Foundation)
-**Authentication Service:**
-- ID-porten OAuth2 flow (structure ready, needs real credentials)
-- JWT access token generation (15-min expiry)
-- Refresh token creation and validation (7-day expiry)
-- Token revocation on logout
-- User creation/lookup in database
-
-**API Endpoints (defined):**
-- `GET /api/auth/login` — Initiate ID-porten flow
-- `POST /api/auth/callback` — Handle OAuth callback
-- `POST /api/auth/refresh` — Refresh access token
-- `POST /api/auth/logout` — Revoke refresh token
-- `GET /health` — Health check
-
-**Status:** 85% complete
-- ✅ Route definitions complete
-- ✅ Database models complete
-- ✅ AuthService logic complete
-- 🟡 Placeholder for real ID-porten API calls
-- ⚪ Multi-tenant middleware not yet implemented
 
 **Deliverable:** `backend/` folder with full structure
 

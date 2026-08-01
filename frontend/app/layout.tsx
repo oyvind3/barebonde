@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import './globals.css'
-import { RootClientWrapper } from './root-wrapper'
 
 export const metadata: Metadata = {
   title: 'Barebonde - Regnskapssystem for landbruksvirksomheter',
@@ -15,9 +14,7 @@ export default function RootLayout({
   return (
     <html lang="no">
       <body>
-        <RootClientWrapper>
-          {children}
-        </RootClientWrapper>
+        {children}
       </body>
     </html>
   )
