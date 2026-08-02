@@ -22,7 +22,7 @@ PLUNK_API_TOKEN = os.getenv("PLUNK_API_TOKEN", "")
 class RegisterRequest(BaseModel):
     first_name: str
     last_name: str
-    email: EmailStr
+    email: str
     password: str
     address: Optional[str] = None
     farm_name: Optional[str] = None
@@ -38,12 +38,12 @@ class AuthResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
 class MagicLinkRequest(BaseModel):
-    email: EmailStr
+    email: str
 
 
 @router.post("/register")
