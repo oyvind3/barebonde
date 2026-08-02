@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import axios from 'axios'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
 import { getOrCreateOnboardingUserId } from '@/lib/onboardingUser'
 
 interface BrregCompany {
@@ -112,7 +112,7 @@ export default function FarmSetupPage() {
       )
 
       router.push('/dashboard')
-    } catch (err: unknown) {
+    } catch (err: any) {
       if (axios.isAxiosError(err) && err.response?.status === 409) {
         setError('Denne gården er allerede registrert i systemet')
       } else if (axios.isAxiosError(err) && err.response?.data?.detail) {
