@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     cosmos_db_connection_string: str
     cosmos_db_database_id: str = "barebonde"
 
+    # Azure Blob Storage for bilag files
+    azure_storage_connection_string: str = ""
+    azure_storage_container_name: str = "bilag"
+
+    # OCR (Azure AI Document Intelligence)
+    azure_document_intelligence_endpoint: str = ""
+    azure_document_intelligence_key: str = ""
+    ocr_default_language: str = "nb"
+
     # Email (Plunk) - Optional
     plunk_secret_api_key: str = ""
     plunk_public_api_key: str = ""

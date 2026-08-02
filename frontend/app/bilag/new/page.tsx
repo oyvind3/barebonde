@@ -24,6 +24,13 @@ type UploadedVoucher = {
   amount: number
   account_code: string | null
   voucher_date: string
+  description?: string | null
+  ocr_text_preview?: string | null
+  ocr_provider?: string | null
+  ocr_confidence?: number | null
+  ocr_suggested_amount?: number | null
+  ocr_suggested_date?: string | null
+  ocr_suggested_supplier?: string | null
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -201,6 +208,15 @@ export default function NewVoucherPage() {
 
       const data = (await response.json()) as UploadedVoucher
       setUploadedVoucher(data)
+      if (!amount && data.ocr_suggested_amount) {
+        setAmount(String(data.ocr_suggested_amount))
+      }
+      if (data.ocr_suggested_date) {
+        setVoucherDate(data.ocr_suggested_date)
+      }
+      if (!description && data.ocr_suggested_supplier) {
+        setDescription(data.ocr_suggested_supplier)
+      }
       setMessage('Bilag lastet opp. Fyll inn konto og beløp for å føre.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ukjent feil')
@@ -288,12 +304,12 @@ export default function NewVoucherPage() {
                   <label className="inline-flex">
                     <input
                       type="file"
-                      accept="image/*,application/pdf"
+                      accept="image/*,application/pdf,text/plain,text/csv,application/json,application/xml,.txt,.csv,.json,.xml"
                       className="hidden"
                       onChange={(event) => handleFileChange(event.target.files?.[0] || null)}
                     />
                     <span className="cursor-pointer bg-white border border-stone-300 hover:border-bonde-green px-4 py-2 rounded-lg text-sm font-semibold text-stone-800">
-                      Velg bilde/PDF
+                      Velg bilde/PDF/tekstfil
                     </span>
                   </label>
 
@@ -462,6 +478,24 @@ export default function NewVoucherPage() {
                 <Card hoverEffect={false} className="p-4 bg-white">
                   {message && <p className="text-emerald-700 text-sm">{message}</p>}
                   {error && <p className="text-red-700 text-sm">{error}</p>}
+                </Card>
+              )}
+
+              {uploadedVoucher && uploadedVoucher.ocr_text_preview && (
+                <Card hoverEffect={false} className="p-6 bg-white">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <h3 className="text-base font-semibold text-stone-900">OCR-forslag</h3>
+                    <span className="text-xs text-stone-500">
+                      {uploadedVoucher.ocr_provider || 'ukjent motor'}
+                      {typeof uploadedVoucher.ocr_confidence === 'number' ? ` • ${(uploadedVoucher.ocr_confidence * 100).toFixed(0)}%` : ''}
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-600 mb-2">
+                    Forslagene er brukt til å forhåndsfylle feltene over. Kontroller før føring.
+                  </p>
+                  <pre className="text-xs leading-relaxed whitespace-pre-wrap bg-stone-50 border border-stone-200 rounded-lg p-3 max-h-56 overflow-y-auto">
+                    {uploadedVoucher.ocr_text_preview}
+                  </pre>
                 </Card>
               )}
             </div>

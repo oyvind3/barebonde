@@ -12,5 +12,10 @@ pytest-asyncio==0.21.1
 python-dotenv==1.0.0
 # Cosmos DB (NoSQL document database)
 azure-cosmos==4.16.3
+# Azure Blob Storage (bilag file uploads)
+azure-storage-blob==12.26.0
+# OCR and document text extraction
+azure-ai-formrecognizer==3.3.3
+pypdf==5.9.0
 # Azure Functions
 azure-functions==1.24.0
