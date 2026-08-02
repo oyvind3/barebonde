@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
