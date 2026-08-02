@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { Navbar } from '@/components/navigation/Navbar'
@@ -8,79 +8,74 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { getOrCreateOnboardingUserId } from '@/lib/onboardingUser'
 
-interface FarmFormData {
-  name: string
-  org_number: string
-}
-
-interface BrregLookupResult {
+interface BrregCompany {
   org_number: string
   name: string
   organization_form: string
   postal_code: string
   city: string
   municipality: string
-  address: string
+  address: str
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export default function FarmSetupPage() {
   const router = useRouter()
-  const [formData, setFormData] = useState<FarmFormData>({
-    name: '',
-    org_number: '',
-  })
-  const [lookupLoading, setLookupLoading] = useState(false)
-  const [lookupResult, setLookupResult] = useState<BrregLookupResult | null>(null)
-  const [lookupError, setLookupError] = useState<string | null>(null)
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCompany, setSelectedCompany] = useState<BrregCompany | null>(null)
+  const [searchResults, setSearchResults] = useState<BrregCompany[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    const nextValue = name === 'org_number' ? value.replace(/\D/g, '').slice(0, 9) : value
-
-    if (name === 'org_number') {
-      setLookupResult(null)
-      setLookupError(null)
-    }
-
-    setFormData(prev => ({
-      ...prev,
-      [name]: nextValue,
-    }))
-  }
-
-  const handleLookup = async () => {
-    setLookupError(null)
-    setError(null)
-
-    if (!/^\d{9}$/.test(formData.org_number)) {
-      setLookupError('Skriv inn 9 sifre først')
+  // Debounce search query to BRREG API
+  useEffect(() => {
+    const trimmed = searchQuery.trim()
+    if (!trimmed || trimmed.length < 2) {
+      setSearchResults([])
+      setIsSearching(false)
       return
     }
 
-    setLookupLoading(true)
-    try {
-      const response = await axios.get<BrregLookupResult>(
-        `${API_BASE_URL}/api/farms/lookup/${formData.org_number}`
-      )
-
-      setLookupResult(response.data)
-      setFormData(prev => ({
-        ...prev,
-        name: prev.name || response.data.name,
-      }))
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.detail) {
-        setLookupError(err.response.data.detail)
-      } else {
-        setLookupError('Klarte ikke slå opp akkurat nå. Prøv igjen.')
-      }
-    } finally {
-      setLookupLoading(false)
+    // If user typed custom text while a company is selected, clear selection unless it matches org_number
+    if (selectedCompany && trimmed !== selectedCompany.name && trimmed !== selectedCompany.org_number) {
+      setSelectedCompany(null)
     }
+
+    const timer = setTimeout(async () => {
+      setIsSearching(true)
+      setSearchError(null)
+
+      try {
+        const response = await axios.get<BrregCompany[]>(
+          `${API_BASE_URL}/api/farms/search`,
+          { params: { q: trimmed } }
+        )
+        setSearchResults(response.data)
+
+        // If exact 9 digits and returned single result, auto-select
+        if (/^\d{9}$/.test(trimmed) && response.data.length === 1) {
+          setSelectedCompany(response.data[0])
+        }
+      } catch (err: unknown) {
+        console.error('Brreg search error:', err)
+        setSearchError('Klarte ikke søke i Brønnøysund. Sjekk nettilkoblingen.')
+      } finally {
+        setIsSearching(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const handleSelectCompany = (company: BrregCompany) => {
+    setSelectedCompany(company)
+    setSearchResults([])
+    setSearchQuery(company.name)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -88,22 +83,23 @@ export default function FarmSetupPage() {
     setLoading(true)
     setError(null)
 
-    try {
-      if (!/^\d{9}$/.test(formData.org_number)) {
-        setError('Organisasjonsnummeret må være 9 sifre')
-        setLoading(false)
-        return
-      }
+    if (!selectedCompany) {
+      setError('Vennligst søk opp og velg et foretak fra Brønnøysundregisteret')
+      setLoading(false)
+      return
+    }
 
+    try {
       const onboardingUserId = getOrCreateOnboardingUserId()
 
       await axios.post(
         `${API_BASE_URL}/api/farms`,
         {
-          name: formData.name.trim(),
-          org_number: formData.org_number,
-        }
-        ,
+          name: selectedCompany.name,
+          org_number: selectedCompany.org_number,
+          address: selectedCompany.address,
+          municipality: selectedCompany.municipality,
+        },
         {
           headers: {
             'x-onboarding-user-id': onboardingUserId,
@@ -137,10 +133,10 @@ export default function FarmSetupPage() {
                 Onboarding
               </span>
               <h1 className="text-3xl sm:text-4xl font-serif text-stone-900 mb-2">
-                Registrer gården din
+                Finn din gård
               </h1>
               <p className="text-stone-600 text-sm">
-                Start med gårdens organisasjonsnummer. Vi henter resten fra Brønnøysund.
+                Skriv inn firmanavn eller organisasjonsnummer for å hente opplysninger direkte fra Brønnøysundregisteret.
               </p>
             </div>
 
@@ -151,71 +147,78 @@ export default function FarmSetupPage() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label htmlFor="name" className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
-                  Gårdsnavn
+              <div className="relative">
+                <label htmlFor="searchQuery" className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
+                  Firmanavn eller organisasjonsnummer *
                 </label>
-                <input
-                  type="text"
-                  id="name"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleInputChange}
-                  required
-                  className="w-full px-4 py-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bonde-green text-sm bg-white"
-                  placeholder="Fylles automatisk etter oppslag"
-                />
-              </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    id="searchQuery"
+                    name="searchQuery"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    required
+                    className="w-full px-4 py-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bonde-green text-sm bg-white"
+                    placeholder="Eks. Grønn Gård eller 987654321"
+                  />
+                  {isSearching && (
+                    <div className="absolute right-3 top-3.5 text-xs text-stone-400 animate-pulse">
+                      Søker...
+                    </div>
+                  )}
+                </div>
 
-              <div>
-                <label htmlFor="org_number" className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
-                  Organisasjonsnummer *
-                </label>
-                <input
-                  type="text"
-                  id="org_number"
-                  name="org_number"
-                  value={formData.org_number}
-                  onChange={handleInputChange}
-                  required
-                  maxLength={9}
-                  className="w-full px-4 py-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bonde-green text-sm bg-white"
-                  placeholder="9 siffer (f.eks. 123456789)"
-                />
-                <p className="text-xs text-stone-500 mt-2">
-                  Bruk nummeret som står i Enhetsregisteret.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  fullWidth
-                  onClick={handleLookup}
-                  disabled={lookupLoading}
-                >
-                  {lookupLoading ? 'SLÅR OPP...' : 'SLÅ OPP I BRØNNØYSUND'}
-                </Button>
-
-                {lookupError && (
-                  <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-900 p-4 text-sm rounded-r-lg">
-                    {lookupError}
+                {/* Dropdown with search results */}
+                {searchResults.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-stone-200 rounded-lg shadow-lg max-h-60 overflow-y-auto divide-y divide-stone-100">
+                    {searchResults.map((company) => (
+                      <button
+                        key={company.org_number}
+                        type="button"
+                        onClick={() => handleSelectCompany(company)}
+                        className="w-full text-left p-3 hover:bg-bonde-oat/50 transition-colors flex flex-col"
+                      >
+                        <span className="font-semibold text-stone-900 text-sm">{company.name}</span>
+                        <div className="flex items-center justify-between text-xs text-stone-500 mt-0.5">
+                          <span>Org.nr: {company.org_number} • {company.organization_form || 'Foretak'}</span>
+                          {company.city && <span>{company.city}</span>}
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 )}
 
-                {lookupResult && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-900">
-                    <p className="font-semibold">Fant: {lookupResult.name}</p>
-                    <p>{lookupResult.address}{lookupResult.address ? ', ' : ''}{lookupResult.postal_code} {lookupResult.city}</p>
-                    <p className="text-emerald-700 text-xs mt-1">Kommune: {lookupResult.municipality}</p>
-                  </div>
+                {searchError && (
+                  <p className="text-xs text-rose-600 mt-2">{searchError}</p>
                 )}
               </div>
+
+              {selectedCompany && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-900">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-emerald-950 text-base">{selectedCompany.name}</span>
+                    <span className="text-xs bg-emerald-200/60 text-emerald-800 font-semibold px-2 py-0.5 rounded">
+                      Verifisert i BRREG
+                    </span>
+                  </div>
+                  <p className="text-emerald-800">
+                    Org.nr: <strong>{selectedCompany.org_number}</strong> ({selectedCompany.organization_form || 'Foretak'})
+                  </p>
+                  {selectedCompany.address && (
+                    <p className="text-emerald-700 text-xs mt-1">
+                      Adresse: {selectedCompany.address}, {selectedCompany.postal_code} {selectedCompany.city}
+                    </p>
+                  )}
+                  {selectedCompany.municipality && (
+                    <p className="text-emerald-700 text-xs">Kommune: {selectedCompany.municipality}</p>
+                  )}
+                </div>
+              )}
 
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !selectedCompany}
                 variant="primary"
                 fullWidth
                 showArrow

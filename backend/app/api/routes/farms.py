@@ -45,6 +45,26 @@ class BrregLookupResponse(BaseModel):
     address: str
 
 
+@router.get("/search")
+async def search_companies(q: str) -> list[BrregLookupResponse]:
+    """
+    Search BRREG for companies by name or 9-digit org number.
+    """
+    query_str = q.strip()
+    if not query_str or len(query_str) < 2:
+        return []
+
+    try:
+        results = await brreg_service.search_orgs(query_str, size=10)
+        return [BrregLookupResponse(**item) for item in results]
+    except Exception as exc:
+        logger.error(f"BRREG search failed for query '{q}': {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Klarte ikke hente data fra Brønnøysund akkurat nå. Prøv igjen."
+        ) from exc
+
+
 @router.get("/lookup/{org_number}")
 async def lookup_org_number(org_number: str) -> BrregLookupResponse:
     """

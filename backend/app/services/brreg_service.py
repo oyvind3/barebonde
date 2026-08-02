@@ -16,11 +16,12 @@ class BrregService:
         self.timeout_seconds = timeout_seconds
 
     async def lookup_org(self, org_number: str) -> Optional[dict[str, Any]]:
-        """Return normalized organization data, or None if not found."""
-        if not org_number.isdigit() or len(org_number) != 9:
+        """Return normalized organization data by 9-digit org number, or None if not found."""
+        cleaned = org_number.strip().replace(" ", "")
+        if not cleaned.isdigit() or len(cleaned) != 9:
             raise ValueError("Organisasjonsnummer må være 9 sifre")
 
-        url = f"{BRREG_BASE_URL}/{org_number}"
+        url = f"{BRREG_BASE_URL}/{cleaned}"
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.get(url)
 
@@ -31,8 +32,42 @@ class BrregService:
         data = response.json()
         return self._normalize(data)
 
+    async def search_orgs(self, query: str, size: int = 10) -> list[dict[str, Any]]:
+        """
+        Search BRREG Enhetsregisteret by name or organization number.
+        Returns a list of normalized organization dicts.
+        """
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            return []
+
+        # If 9 digits, do direct lookup first
+        digits_only = cleaned_query.replace(" ", "")
+        if digits_only.isdigit() and len(digits_only) == 9:
+            direct = await self.lookup_org(digits_only)
+            if direct:
+                return [direct]
+
+        # Search by name or partial string using BRREG search endpoint
+        params = {
+            "navn": cleaned_query,
+            "navnMetodeForSoek": "FORTLOEPENDE",
+            "size": min(size, 20),
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.get(BRREG_BASE_URL, params=params)
+
+        response.raise_for_status()
+        json_data = response.json()
+
+        embedded = json_data.get("_embedded") or {}
+        enheter = embedded.get("enheter") or []
+
+        return [self._normalize(data) for data in enheter]
+
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
-        address_data = data.get("forretningsadresse") or {}
+        address_data = data.get("forretningsadresse") or data.get("postadresse") or {}
         address_lines = address_data.get("adresse") or []
 
         return {
