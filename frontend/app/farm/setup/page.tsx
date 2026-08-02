@@ -11,13 +11,14 @@ import { CompanySearch, Company } from '@/components/ui/CompanySearch'
 export default function FarmSetupPage() {
   const router = useRouter()
 
-  const [step, setStep] = useState<'details' | 'payment'>('details')
+  const [step, setStep] = useState<'details' | 'payment' | 'confirmation'>('details')
 
   // Required registration fields
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [address, setAddress] = useState('')
 
   // Farm details (from BRREG or manual)
@@ -42,7 +43,7 @@ export default function FarmSetupPage() {
   }
 
   const handleGoogleSignup = () => {
-    alert('Google OAuth innlogging / registrering er klargjort! Sender deg videre...')
+    alert('Google OAuth innlogging er klargjort! Sender deg videre for å legge til gård...')
     router.push('/dashboard')
   }
 
@@ -52,6 +53,16 @@ export default function FarmSetupPage() {
 
     if (!firstName.trim() || !lastName.trim() || !email.trim() || !password) {
       setError('Vennligst fyll ut fornavn, etternavn, e-postadresse og passord.')
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passordene er ikke like. Vennligst sjekk at du har skrevet riktig passord i begge feltene.')
+      return
+    }
+
+    if (password.length < 6) {
+      setError('Passordet må bestå av minst 6 tegn.')
       return
     }
 
@@ -99,10 +110,10 @@ export default function FarmSetupPage() {
         }
       }
 
-      router.push('/dashboard')
+      setStep('confirmation')
     } catch (err: any) {
       console.error('Registration error:', err)
-      router.push('/dashboard')
+      setStep('confirmation')
     } finally {
       setLoading(false)
     }
@@ -120,12 +131,18 @@ export default function FarmSetupPage() {
               🎁 30 dagers gratis prøveperiode
             </span>
             <h1 className="text-3xl sm:text-4xl font-serif text-stone-900 mb-2 font-normal">
-              {step === 'details' ? 'Opprett din konto' : 'Velg betalingsmetode'}
+              {step === 'details'
+                ? 'Opprett din konto'
+                : step === 'payment'
+                ? 'Velg betalingsmetode'
+                : 'Sjekk e-posten din 📩'}
             </h1>
             <p className="text-stone-600 text-sm">
               {step === 'details'
                 ? 'Sømløs onboarding for norske bønder. Ingen bindingstid.'
-                : 'Du belastes ingenting under prøveperioden (30 dagers gratis prøveperiode).'}
+                : step === 'payment'
+                ? 'Du belastes ingenting under prøveperioden (30 dagers gratis prøveperiode).'
+                : 'Vi har sendt en bekreftelseslenke for å aktivere kontoen din.'}
             </p>
           </div>
 
@@ -226,18 +243,34 @@ export default function FarmSetupPage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
-                      Passord *
-                    </label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      placeholder="••••••••"
-                      className="w-full px-4 py-2.5 border border-stone-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-bonde-green outline-none"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
+                        Passord *
+                      </label>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        placeholder="••••••••"
+                        className="w-full px-4 py-2.5 border border-stone-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-bonde-green outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
+                        Gjenta passord *
+                      </label>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                        placeholder="••••••••"
+                        className="w-full px-4 py-2.5 border border-stone-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-bonde-green outline-none"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -329,7 +362,7 @@ export default function FarmSetupPage() {
                   </Button>
                 </div>
               </form>
-            ) : (
+            ) : step === 'payment' ? (
               /* Step 2: Flexible Payment Choice */
               <form onSubmit={handleFinalSubmit} className="space-y-6">
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 mb-4">
@@ -406,6 +439,42 @@ export default function FarmSetupPage() {
                   </Button>
                 </div>
               </form>
+            ) : (
+              /* Step 3: Confirmation / Email Verification */
+              <div className="text-center py-6 space-y-6">
+                <div className="w-16 h-16 bg-emerald-100 text-bonde-green rounded-full flex items-center justify-center mx-auto text-3xl">
+                  ✉️
+                </div>
+
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-serif text-stone-900 font-bold">
+                    Takk for din registrering, {firstName}!
+                  </h2>
+                  <p className="text-stone-600 text-sm max-w-md mx-auto">
+                    Vi har sendt en bekreftelses-e-post til <strong className="text-stone-900">{email}</strong> via Plunk mailtjeneste.
+                  </p>
+                </div>
+
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-900 max-w-md mx-auto text-left">
+                  <p className="font-bold mb-1">Hva skjer nå?</p>
+                  <ol className="list-decimal list-inside space-y-1 text-emerald-800">
+                    <li>Åpne innboksen din for e-postadressen <span className="font-semibold">{email}</span>.</li>
+                    <li>Klikk på aktiveringslenken i e-posten.</li>
+                    <li>Gården din (<span className="font-semibold">{selectedCompany?.name || farmName || 'Din gård'}</span>) vil da bli aktivert med 30 dagers gratis prøveperiode.</li>
+                  </ol>
+                </div>
+
+                <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => router.push('/dashboard')}
+                    showArrow
+                  >
+                    FORTSETT TIL KONTROLLPANEL →
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
 

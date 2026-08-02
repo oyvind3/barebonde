@@ -16,7 +16,7 @@ from app.db.cosmos_models import User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PLUNK_API_TOKEN = os.getenv("PLUNK_API_TOKEN", "")
+PLUNK_API_TOKEN = os.getenv("PLUNK_SECRET_API_KEY") or os.getenv("PLUNK_PUBLIC_API_KEY") or os.getenv("PLUNK_API_TOKEN", "")
 
 
 class RegisterRequest(BaseModel):
