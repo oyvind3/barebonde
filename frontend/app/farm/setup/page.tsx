@@ -22,8 +22,6 @@ interface BrregCompany {
   registered_date?: string
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://data.brreg.no/enhetsregisteret/api/enheter'
-
 export default function FarmSetupPage() {
   const router = useRouter()
 
