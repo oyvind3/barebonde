@@ -74,6 +74,7 @@ class Farm:
         org_number: str,  # Partition key
         address: Optional[str] = None,
         municipality: Optional[str] = None,
+        brreg_verified: bool = False,
         id: Optional[str] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None
@@ -83,6 +84,7 @@ class Farm:
         self.org_number = org_number  # Partition key
         self.address = address or ""
         self.municipality = municipality or ""
+        self.brreg_verified = brreg_verified
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
         self.type = "farm"  # Document type discriminator
@@ -96,6 +98,7 @@ class Farm:
             "org_number": self.org_number,
             "address": self.address,
             "municipality": self.municipality,
+            "brreg_verified": self.brreg_verified,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
         }
@@ -109,6 +112,7 @@ class Farm:
             org_number=data.get("org_number"),
             address=data.get("address"),
             municipality=data.get("municipality"),
+            brreg_verified=data.get("brreg_verified", False),
             created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None,
             updated_at=datetime.fromisoformat(data.get("updated_at")) if data.get("updated_at") else None
         )

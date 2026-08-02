@@ -3,13 +3,14 @@ Farm management routes using Cosmos DB (Open Demo Mode)
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Header
 from pydantic import BaseModel
 from azure.cosmos import exceptions
 import logging
 
 from app.db.cosmos_client import get_farms_container, get_farm_users_container
 from app.db.cosmos_models import Farm, FarmUser, UserRole
+from app.services.brreg_service import brreg_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,10 +31,53 @@ class FarmResponse(BaseModel):
     org_number: str
     address: Optional[str]
     municipality: Optional[str]
+    brreg_verified: bool = False
+
+
+class BrregLookupResponse(BaseModel):
+    """Response for BRREG lookup."""
+    org_number: str
+    name: str
+    organization_form: str
+    postal_code: str
+    city: str
+    municipality: str
+    address: str
+
+
+@router.get("/lookup/{org_number}")
+async def lookup_org_number(org_number: str) -> BrregLookupResponse:
+    """
+    Look up organization details from BRREG using organization number.
+    """
+    try:
+        result = await brreg_service.lookup_org(org_number)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        ) from exc
+    except Exception as exc:
+        logger.error(f"BRREG lookup failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Klarte ikke hente data fra Brønnøysund akkurat nå. Prøv igjen."
+        ) from exc
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Fant ikke organisasjonsnummeret i Brønnøysundregisteret"
+        )
+
+    return BrregLookupResponse(**result)
 
 
 @router.post("")
-async def create_farm(request: FarmCreateRequest) -> FarmResponse:
+async def create_farm(
+    request: FarmCreateRequest,
+    x_onboarding_user_id: Optional[str] = Header(default=None)
+) -> FarmResponse:
     """
     Create a new farm (Demo Mode)
     """
@@ -53,23 +97,42 @@ async def create_farm(request: FarmCreateRequest) -> FarmResponse:
     except exceptions.CosmosHttpResponseError as e:
         logger.error(f"Error checking existing farm: {e}")
     
+    brreg_data = None
+    try:
+        brreg_data = await brreg_service.lookup_org(request.org_number)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        ) from exc
+    except Exception as exc:
+        logger.warning(f"Skipping BRREG enrich due to transient error: {exc}")
+
+    if not brreg_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Organisasjonsnummeret finnes ikke i Brønnøysundregisteret"
+        )
+
     try:
         # Create farm
         farm = Farm(
-            name=request.name,
+            name=request.name.strip() or brreg_data.get("name", ""),
             org_number=request.org_number,
-            address=request.address,
-            municipality=request.municipality
+            address=request.address or brreg_data.get("address", ""),
+            municipality=request.municipality or brreg_data.get("municipality", ""),
+            brreg_verified=True
         )
         
         # Save to Cosmos DB
         farms_container.upsert_item(farm.to_dict())
         logger.info(f"Created farm in demo mode: {farm.id} - {request.name}")
         
-        # Link demo user as owner
+        # Link onboarding user as owner (prepares for full auth integration).
+        user_id = (x_onboarding_user_id or "demo-user").strip() or "demo-user"
         farm_users_container = get_farm_users_container()
         farm_user = FarmUser(
-            user_id="demo-user",
+            user_id=user_id,
             farm_id=farm.id,
             role=UserRole.OWNER
         )
@@ -80,7 +143,8 @@ async def create_farm(request: FarmCreateRequest) -> FarmResponse:
             name=farm.name,
             org_number=farm.org_number,
             address=farm.address,
-            municipality=farm.municipality
+            municipality=farm.municipality,
+            brreg_verified=farm.brreg_verified
         )
     
     except Exception as e:
@@ -106,7 +170,8 @@ async def get_farm(farm_id: str) -> FarmResponse:
             name=farm.name,
             org_number=farm.org_number,
             address=farm.address,
-            municipality=farm.municipality
+            municipality=farm.municipality,
+            brreg_verified=farm.brreg_verified
         )
     except exceptions.CosmosResourceNotFoundError:
         raise HTTPException(
