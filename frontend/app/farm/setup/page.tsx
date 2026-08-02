@@ -297,19 +297,16 @@ export default function FarmSetupPage() {
 
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
-                      Adresse (Google Maps adresse-søk) *
+                      Adresse *
                     </label>
                     <input
                       type="text"
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
                       required
-                      placeholder="Gårdsveien 14, 2350 NES (eller Google Maps søk)"
+                      placeholder="Eks. Gårdsveien 14, 2350 NES"
                       className="w-full px-4 py-2.5 border border-stone-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-bonde-green outline-none"
                     />
-                    <p className="text-[11px] text-stone-400 mt-1">
-                      💡 Integration ready: Google Maps Autocomplete API (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`)
-                    </p>
                   </div>
                 </div>
 
