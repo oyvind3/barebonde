@@ -22,14 +22,14 @@ export const Navbar: React.FC = () => {
 
           {/* Navigation Links */}
           <nav className="hidden lg:flex items-center space-x-8 text-sm font-medium text-stone-700">
-            <Link href="#funksjoner" className="hover:text-bonde-green transition-colors py-2">
-              Funksjoner
+            <Link href="/dashboard" className="hover:text-bonde-green transition-colors py-2">
+              Dashboard
             </Link>
-            <Link href="#regnskap" className="hover:text-bonde-green transition-colors py-2">
-              Regnskap
+            <Link href="/bilag" className="hover:text-bonde-green transition-colors py-2">
+              Bilag
             </Link>
-            <Link href="#priser" className="hover:text-bonde-green transition-colors py-2">
-              Priser
+            <Link href="/reports" className="hover:text-bonde-green transition-colors py-2">
+              Rapporter
             </Link>
           </nav>
         </div>
@@ -70,33 +70,30 @@ export const Navbar: React.FC = () => {
       {/* Mobile Menu dropdown */}
       {mobileMenuOpen && (
         <div className="sm:hidden border-b border-gray-200 bg-white px-4 pt-2 pb-6 space-y-3">
-          <Link href="#" className="block text-sm font-medium text-gray-700 py-2">
-            Produkter
+          <Link href="/dashboard" className="block text-sm font-medium text-gray-700 py-2">
+            Dashboard
           </Link>
-          <Link href="#" className="block text-sm font-medium text-gray-700 py-2">
-            Bruksområder
+          <Link href="/bilag" className="block text-sm font-medium text-gray-700 py-2">
+            Bilag
           </Link>
-          <Link href="#" className="block text-sm font-medium text-gray-700 py-2">
-            Innsikt
+          <Link href="/reports" className="block text-sm font-medium text-gray-700 py-2">
+            Rapporter
           </Link>
-          <Link href="#" className="block text-sm font-medium text-gray-700 py-2">
-            Kontakt
-          </Link>
-          <Link href="#" className="block text-sm font-medium text-gray-700 py-2">
-            Priser
+          <Link href="/farm/setup" className="block text-sm font-medium text-gray-700 py-2">
+            Gårdsoppsett
           </Link>
           <div className="pt-4 border-t border-gray-100 flex flex-col space-y-2">
             <Link
               href="/farm/setup"
-              className="w-full text-center bg-[#43468b] text-white font-bold text-xs uppercase tracking-wider py-3"
+              className="w-full text-center bg-bonde-green text-white font-bold text-xs uppercase tracking-wider py-3 rounded-lg"
             >
-              PRØV GRATIS
+              OPPDATER GÅRD
             </Link>
             <Link
-              href="/farm/setup"
+              href="/"
               className="w-full text-center text-xs font-bold uppercase tracking-wider py-2 text-gray-800"
             >
-              LOGG INN
+              HJEM
             </Link>
           </div>
         </div>

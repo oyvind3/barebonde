@@ -1,10 +1,79 @@
 'use client'
 
+import { useEffect, useMemo, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 
+type MonthlyRow = { month: string; income: number; expense: number; net: number }
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const FARM_ID_KEY = 'barebonde_active_farm_id'
+
 export default function Dashboard() {
+  const [farmId, setFarmId] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [monthlyRows, setMonthlyRows] = useState<MonthlyRow[]>([])
+  const [vat, setVat] = useState({ incoming_vat: 0, outgoing_vat: 0, estimated_settlement: 0 })
+  const [journalCount, setJournalCount] = useState(0)
+
+  useEffect(() => {
+    const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
+    setFarmId(storedFarmId)
+  }, [])
+
+  useEffect(() => {
+    if (!farmId) {
+      setLoading(false)
+      return
+    }
+
+    const fetchData = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const [monthlyRes, vatRes, journalRes] = await Promise.all([
+          fetch(`${API_BASE}/api/accounting/reports/monthly?farm_id=${encodeURIComponent(farmId)}`),
+          fetch(`${API_BASE}/api/accounting/reports/vat?farm_id=${encodeURIComponent(farmId)}`),
+          fetch(`${API_BASE}/api/accounting/reports/journal?farm_id=${encodeURIComponent(farmId)}`),
+        ])
+
+        if (!monthlyRes.ok || !vatRes.ok || !journalRes.ok) {
+          throw new Error('Klarte ikke hente regnskapsdata')
+        }
+
+        const monthlyData = await monthlyRes.json()
+        const vatData = await vatRes.json()
+        const journalData = await journalRes.json()
+
+        setMonthlyRows(monthlyData.rows || [])
+        setVat(vatData)
+        setJournalCount((journalData.rows || []).length)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Ukjent feil')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [farmId])
+
+  const totals = useMemo(() => {
+    return monthlyRows.reduce(
+      (acc, row) => {
+        acc.income += row.income || 0
+        acc.expense += row.expense || 0
+        return acc
+      },
+      { income: 0, expense: 0 }
+    )
+  }, [monthlyRows])
+
+  const money = (value: number) =>
+    new Intl.NumberFormat('nb-NO', { style: 'currency', currency: 'NOK', maximumFractionDigits: 0 }).format(value)
+
   return (
     <div className="min-h-screen bg-bonde-oat flex flex-col font-sans">
       <Navbar />
@@ -20,43 +89,69 @@ export default function Dashboard() {
               Gårdens kontrollpanel
             </h1>
             <p className="text-stone-600 text-sm mt-1">
-              Velkommen til Barebonde — enkel og oversiktlig administrasjon av gårdsdriften.
+              Regnskap, bilag og rapporter samlet på ett sted.
             </p>
           </div>
 
           <div className="mt-4 md:mt-0 flex gap-3">
+            <Button href="/bilag/new" variant="primary" showArrow>
+              NYTT BILAG
+            </Button>
+            <Button href="/reports" variant="outline" showArrow>
+              RAPPORTER
+            </Button>
             <Button href="/farm/setup" variant="outline" showArrow>
               ENDRE GÅRD
             </Button>
           </div>
         </div>
 
+        {!farmId && (
+          <Card hoverEffect={false} className="p-6 bg-white mb-10">
+            <p className="text-sm text-stone-700">Sett opp gård først for å aktivere regnskap og bilag.</p>
+          </Card>
+        )}
+
+        {farmId && loading && (
+          <Card hoverEffect={false} className="p-6 bg-white mb-10">
+            <p className="text-sm text-stone-700">Laster regnskapsdata...</p>
+          </Card>
+        )}
+
+        {farmId && error && (
+          <Card hoverEffect={false} className="p-6 bg-white mb-10">
+            <p className="text-sm text-red-700">{error}</p>
+          </Card>
+        )}
+
         {/* Metrics Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+        {farmId && !loading && !error && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
-            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Driftsinntekter MHI</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">kr 842 500</p>
-            <p className="text-xs text-emerald-700 mt-1 font-medium">↑ Synkronisert med Tine/FK</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Inngående penger</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.income)}</p>
+            <p className="text-xs text-stone-600 mt-1">Førte inntekter</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
-            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">MVA-Melding Frist</p>
-            <p className="text-3xl font-serif text-bonde-green font-bold">10. Aug</p>
-            <p className="text-xs text-stone-600 mt-1">Klargjort for Altinn</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Utgående kostnader</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.expense)}</p>
+            <p className="text-xs text-stone-600 mt-1">Førte utgifter</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
-            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Forpaktningsavtaler</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">3</p>
-            <p className="text-xs text-emerald-700 mt-1 font-medium">✓ eSignert med BankID</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">MVA-estimat</p>
+            <p className="text-3xl font-serif text-bonde-green font-bold">{money(vat.estimated_settlement)}</p>
+            <p className="text-xs text-stone-600 mt-1">Utgående minus inngående</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
-            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Aktive brukere</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">2</p>
-            <p className="text-xs text-stone-600 mt-1">Gårdbruker & Regnskapsfører</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Aktive bilag</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{journalCount}</p>
+            <p className="text-xs text-stone-600 mt-1">Registrerte bilag</p>
           </Card>
-        </div>
+          </div>
+        )}
 
         {/* Demo info banner */}
         <Card hoverEffect={false} className="p-8 border border-amber-200/80 bg-amber-50/60 rounded-2xl mb-10">
@@ -64,10 +159,10 @@ export default function Dashboard() {
             <span className="text-2xl">🌱</span>
             <div>
               <h3 className="text-base font-bold text-stone-900 uppercase tracking-wide mb-1">
-                Demonavigasjon er aktiv
+                Enkel flyt først
               </h3>
               <p className="text-sm text-stone-700 leading-relaxed">
-                ID-porten innlogging og direktekobling mot Landbruksdirektoratet, Peppol/EHF, ELMA og Altinn er under klargjøring for produksjon.
+                Start med bilag: last opp, velg konto, før. Rapporter oppdateres automatisk når bilag føres.
               </p>
             </div>
           </div>
