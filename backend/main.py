@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.api.routes import health, farms, accounting
+from app.api.routes import health, farms, accounting, auth
 from app.db.cosmos_client import init_cosmos_db
 
 
@@ -46,6 +46,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router, tags=["Health"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(farms.router, prefix="/api/farms", tags=["Farms"])
 app.include_router(accounting.router, prefix="/api/accounting", tags=["Accounting"])
 

@@ -1,4 +1,5 @@
 # Project Instructions
+prøv å spare så mye tomken usage som mulig så jeg ikke tømmer budsjettet mitt
 
 ## Rolle
 
