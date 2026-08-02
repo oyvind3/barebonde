@@ -7,7 +7,7 @@
 - [x] Azure Function App (Flex Consumption) configured and live
 - [x] Azure Cosmos DB (NoSQL) database & containers setup
 - [x] GitHub Actions automated CI/CD for frontend & backend
-- [x] Open Demo Mode enabled for initial evaluation
+- [x] Open Demo Mode & Seamless User Onboarding enabled
 
 ### Strategic Planning
 - [x] Product analysis and competitive positioning
@@ -29,37 +29,43 @@
 - [x] Project structure scaffolded
 - [x] Cosmos DB client & ORM models initialized
 - [x] FastAPI app initialized on Azure Function App
-- [x] API routes defined (farms, health)
+- [x] API routes defined (farms, health, accounting, auth)
 - [x] CORS configured
 - [x] Dependencies and requirements.txt ready
 
 ### Frontend (Next.js + React + TypeScript)
 - [x] Next.js static export build configured
 - [x] Tailwind CSS configured
-- [x] Landing page created (Demo mode entry)
-- [x] Farm setup page created
+- [x] Landing page created
+- [x] Seamless User Signup & Farm setup page created (`CompanySearch` + Password Verification + Plunk Email confirmation)
 - [x] Dashboard view created
 - [x] TypeScript configuration
 
 ---
 
-## 🟡 Phase 1.1: Core Features (In Progress)
+## ✅ Phase 1: Core Features & User Onboarding (Completed)
 
-- [ ] Brønnøysundregistrene (BRREG) organization lookup integration
-- [ ] Expense & Revenue transaction entry
-- [ ] Tax & agricultural deadline tracker
-- [ ] Contract & document management (eSignering / Peppol)
+- [x] Brønnøysundregistrene (BRREG) organization lookup integration (`CompanySearch.tsx`)
+- [x] User registration & authentication with password verification
+- [x] Plunk Transactional Email Confirmation Integration (`PLUNK_SECRET_API_KEY`)
+- [x] Expense & Revenue transaction entry
+- [x] Tax & agricultural deadline tracker
+- [x] Flexible Payment Selection (EHF / Vipps)
+- [x] Document upload endpoint & OCR service (`ocr_service.py`, `storage_service.py`)
 
-- [ ] Document upload endpoint
-- [ ] Document versioning
-- [ ] Contract creation
-- [ ] eSignering integration
-- [ ] Document search
+---
+
+## 🟡 Phase 2: Document Management & Deadlines (In Progress)
+
+- [x] Document upload endpoint
+- [x] OCR text extraction service
+- [ ] Contract creation & eSignering integration
+- [ ] Document search & versioning
 
 ### Deadlines & Fritters
 - [ ] Deadline CRUD
-- [ ] Automatic fritter population (landbruk-spesifikke)
-- [ ] Email notifications
+- [x] Automatic fritter population (landbruk-spesifikke frister)
+- [x] Email notifications via Plunk
 - [ ] SMS notifications (phase 2.5)
 - [ ] Calendar view
 

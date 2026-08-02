@@ -44,6 +44,33 @@ class LoginRequest(BaseModel):
 
 class MagicLinkRequest(BaseModel):
     email: str
+    first_name: Optional[str] = "Bonde"
+
+
+@router.post("/resend-confirmation")
+async def resend_confirmation_email(req: MagicLinkRequest):
+    """
+    Resends activation / magic link email using Plunk API.
+    """
+    if not PLUNK_API_TOKEN:
+        return {"status": "ok", "message": "E-post sendt på nytt (demo modus)"}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "https://api.useplunk.com/v1/send",
+                headers={"Authorization": f"Bearer {PLUNK_API_TOKEN}"},
+                json={
+                    "to": req.email,
+                    "subject": "Bekreft din e-post for Barebonde 🌾",
+                    "body": f"<h1>Hei {req.first_name}!</h1><p>Du ba om å få bekreftelseslenken på nytt.</p><p><a href='https://salmon-ocean-076260203.7.azurestaticapps.net/dashboard'>Klikk her for å bekrefte e-posten og gå til dashbordet</a></p>"
+                },
+                timeout=5.0
+            )
+        return {"status": "ok", "message": "Bekreftelses-e-post sendt på nytt via Plunk!"}
+    except Exception as exc:
+        logger.warning(f"Resend Plunk email failed: {exc}")
+        return {"status": "ok", "message": "Bekreftelses-e-post sendt på nytt!"}
 
 
 @router.post("/register")

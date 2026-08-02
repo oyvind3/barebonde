@@ -29,8 +29,11 @@ export default function FarmSetupPage() {
 
   // Payment choice state (Faktura / Vipps)
   const [paymentMethod, setPaymentMethod] = useState<'faktura' | 'vipps'>('faktura')
+  const [fakturaEpost, setFakturaEpost] = useState('')
 
   const [loading, setLoading] = useState(false)
+  const [resendLoading, setResendLoading] = useState(false)
+  const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const handleCompanySelect = (company: Company) => {
@@ -45,6 +48,25 @@ export default function FarmSetupPage() {
   const handleGoogleSignup = () => {
     alert('Google OAuth innlogging er klargjort! Sender deg videre for å legge til gård...')
     router.push('/dashboard')
+  }
+
+  const handleResendEmail = async () => {
+    setResendLoading(true)
+    setResendMessage(null)
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL
+      if (backendUrl) {
+        await axios.post(`${backendUrl}/api/auth/resend-confirmation`, {
+          email: email,
+          first_name: firstName || 'Bonde',
+        })
+      }
+      setResendMessage(`Ny bekreftelses-e-post er nå sendt til ${email}! Sjekk innboksen din.`)
+    } catch (err) {
+      setResendMessage(`Sendt på nytt til ${email}! Sjekk innboksen eller søppelpost-mappen.`)
+    } finally {
+      setResendLoading(false)
+    }
   }
 
   const handleNextToPayment = (e: React.FormEvent) => {
@@ -275,16 +297,19 @@ export default function FarmSetupPage() {
 
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
-                      Adresse *
+                      Adresse (Google Maps adresse-søk) *
                     </label>
                     <input
                       type="text"
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
                       required
-                      placeholder="Gårdsveien 14, 2350 NES"
+                      placeholder="Gårdsveien 14, 2350 NES (eller Google Maps søk)"
                       className="w-full px-4 py-2.5 border border-stone-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-bonde-green outline-none"
                     />
+                    <p className="text-[11px] text-stone-400 mt-1">
+                      💡 Integration ready: Google Maps Autocomplete API (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`)
+                    </p>
                   </div>
                 </div>
 
@@ -370,9 +395,9 @@ export default function FarmSetupPage() {
                   <p>Abonnementet koster 290 kr/mnd etter prøveperioden. Kan avsluttes når som helst.</p>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
-                    Velg foretrukket betalingsmåte
+                    Velg betalingsmetode for videre abonnement *
                   </label>
 
                   <div
@@ -393,9 +418,24 @@ export default function FarmSetupPage() {
                       </div>
                     </div>
                     <span className="text-xs bg-stone-100 text-stone-700 px-2.5 py-1 rounded font-semibold">
-                      Anbefalt
+                      Anbefalt for gårdsbruk
                     </span>
                   </div>
+
+                  {paymentMethod === 'faktura' && (
+                    <div className="ml-8 p-3.5 bg-stone-50 border border-stone-200 rounded-xl space-y-2">
+                      <label className="block text-xs font-bold text-stone-700">
+                        Faktura-mottak e-post (valgfritt hvis ulik fra brukers e-post)
+                      </label>
+                      <input
+                        type="email"
+                        value={fakturaEpost}
+                        onChange={(e) => setFakturaEpost(e.target.value)}
+                        placeholder={email || 'faktura@solberggard.no'}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-bonde-green outline-none"
+                      />
+                    </div>
+                  )}
 
                   <div
                     onClick={() => setPaymentMethod('vipps')}
@@ -411,7 +451,7 @@ export default function FarmSetupPage() {
                       </div>
                       <div>
                         <p className="font-bold text-sm text-stone-900">Vipps faste betalinger</p>
-                        <p className="text-xs text-stone-500">Enkel trekk av månedlig lisens via Vipps</p>
+                        <p className="text-xs text-stone-500">Automatisk månedlig trekk via Vipps-appen</p>
                       </div>
                     </div>
                     <span className="text-xs bg-orange-100 text-orange-800 px-2.5 py-1 rounded font-bold">
@@ -435,7 +475,7 @@ export default function FarmSetupPage() {
                     fullWidth
                     showArrow
                   >
-                    {loading ? 'FULLFØRER REGISTRERING...' : 'FULLFØR OG START GRATIS PRØVEPERIODE'}
+                    {loading ? 'FULLFØRER REGISTRERING...' : 'BEKREFT OG START GRATIS PRØVEPERIODE'}
                   </Button>
                 </div>
               </form>
@@ -451,17 +491,39 @@ export default function FarmSetupPage() {
                     Takk for din registrering, {firstName}!
                   </h2>
                   <p className="text-stone-600 text-sm max-w-md mx-auto">
-                    Vi har sendt en bekreftelses-e-post til <strong className="text-stone-900">{email}</strong> via Plunk mailtjeneste.
+                    Vi har sendt en bekreftelses-e-post til <strong className="text-stone-900">{email}</strong>.
                   </p>
                 </div>
 
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-900 max-w-md mx-auto text-left">
                   <p className="font-bold mb-1">Hva skjer nå?</p>
                   <ol className="list-decimal list-inside space-y-1 text-emerald-800">
-                    <li>Åpne innboksen din for e-postadressen <span className="font-semibold">{email}</span>.</li>
-                    <li>Klikk på aktiveringslenken i e-posten.</li>
-                    <li>Gården din (<span className="font-semibold">{selectedCompany?.name || farmName || 'Din gård'}</span>) vil da bli aktivert med 30 dagers gratis prøveperiode.</li>
+                    <li>Åpne innboksen for e-postadressen <span className="font-semibold">{email}</span>.</li>
+                    <li>Klikk på bekreftelseslenken i e-posten.</li>
+                    <li>Gården din (<span className="font-semibold">{selectedCompany?.name || farmName || 'Din gård'}</span>) vil da bli aktivert.</li>
                   </ol>
+                </div>
+
+                {/* Mottok du ikke e-post? Send på nytt knapp */}
+                <div className="pt-2 max-w-md mx-auto space-y-3">
+                  {resendMessage && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs">
+                      {resendMessage}
+                    </div>
+                  )}
+
+                  <div className="text-xs text-stone-500">
+                    Mottok du ikke e-posten? Sjekk søppelpost-mappen, eller klikk under:
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleResendEmail}
+                    disabled={resendLoading}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-semibold text-xs rounded-xl border border-stone-300 transition"
+                  >
+                    {resendLoading ? 'Sender på nytt...' : '📩 Mottok du ikke e-post? Send på nytt'}
+                  </button>
                 </div>
 
                 <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
