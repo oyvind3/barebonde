@@ -43,6 +43,10 @@ class BrregLookupResponse(BaseModel):
     city: str
     municipality: str
     address: str
+    is_active: bool = True
+    registered_mva: str = "Ukjent"
+    industry_code: str = ""
+    registered_date: str = ""
 
 
 @router.get("/search")

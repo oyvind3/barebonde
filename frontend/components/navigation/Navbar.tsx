@@ -37,16 +37,16 @@ export const Navbar: React.FC = () => {
         {/* Right CTA / Auth Buttons */}
         <div className="hidden sm:flex items-center space-x-6">
           <Link
-            href="/farm/setup"
+            href="/login"
             className="text-xs font-bold uppercase tracking-wider text-stone-800 hover:text-bonde-green transition"
           >
             LOGG INN
           </Link>
           <Link
             href="/farm/setup"
-            className="bg-bonde-green hover:bg-bonde-sage text-white text-xs font-bold uppercase tracking-wider px-5 py-2.5 rounded-lg transition shadow-xs"
+            className="bg-bonde-green hover:bg-bonde-sage text-white text-xs font-bold uppercase tracking-wider px-5 py-2.5 rounded-lg transition shadow-xs flex items-center gap-1.5"
           >
-            PRØV GRATIS
+            PRØV GRATIS I 30 DAGER
           </Link>
         </div>
 

@@ -70,14 +70,38 @@ class BrregService:
         address_data = data.get("forretningsadresse") or data.get("postadresse") or {}
         address_lines = address_data.get("adresse") or []
 
+        org_form_obj = data.get("organisasjonsform") or {}
+        org_form_code = org_form_obj.get("kode", "")
+        org_form_desc = org_form_obj.get("beskrivelse", "")
+        org_form_str = f"{org_form_desc} ({org_form_code})" if org_form_code and org_form_desc else (org_form_desc or org_form_code)
+
+        naering_obj = data.get("naeringskode1") or {}
+        naering_code = naering_obj.get("kode", "")
+        naering_desc = naering_obj.get("beskrivelse", "")
+        naering_str = f"{naering_desc} ({naering_code})" if naering_code and naering_desc else (naering_desc or naering_code)
+
+        mva = data.get("registrertIMvaregisteret")
+        mva_str = "Ja" if mva is True else ("Nei" if mva is False else "Ukjent")
+
+        reg_date = data.get("registreringsdatoEnhetsregisteret", "")
+        if reg_date and len(reg_date) == 10 and "-" in reg_date:
+            parts = reg_date.split("-")
+            reg_date_formatted = f"{parts[2]}.{parts[1]}.{parts[0]}"
+        else:
+            reg_date_formatted = reg_date
+
         return {
             "org_number": data.get("organisasjonsnummer", ""),
             "name": data.get("navn", ""),
-            "organization_form": (data.get("organisasjonsform") or {}).get("beskrivelse", ""),
+            "organization_form": org_form_str,
             "postal_code": address_data.get("postnummer", ""),
             "city": address_data.get("poststed", ""),
             "municipality": address_data.get("kommune", ""),
             "address": ", ".join(address_lines),
+            "is_active": not data.get("slettedato"),
+            "registered_mva": mva_str,
+            "industry_code": naering_str,
+            "registered_date": reg_date_formatted,
         }
 
 

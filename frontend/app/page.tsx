@@ -27,7 +27,7 @@ export default function Home() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-16">
             <Button href="/farm/setup" variant="primary" showArrow fullWidth>
-              PRØV GRATIS
+              PRØV GRATIS I 30 DAGER
             </Button>
             <Button href="/dashboard" variant="secondary" showArrow fullWidth>
               SE DEMO
