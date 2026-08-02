@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -18,9 +19,17 @@ export default function Dashboard() {
   const [vat, setVat] = useState({ incoming_vat: 0, outgoing_vat: 0, estimated_settlement: 0 })
   const [journalCount, setJournalCount] = useState(0)
 
+  // Demo / guest check (Simulating gated subscription state)
+  const [isSubscribed, setIsSubscribed] = useState(false)
+
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
     setFarmId(storedFarmId)
+    // Check if user is logged in & has active subscription
+    const user = window.localStorage.getItem('barebonde_user')
+    if (user || storedFarmId) {
+      setIsSubscribed(true)
+    }
   }, [])
 
   useEffect(() => {
@@ -78,7 +87,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-bonde-oat flex flex-col font-sans">
       <Navbar />
 
-      <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 py-10 w-full">
+      <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 py-10 w-full relative">
         {/* Dashboard Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 pb-6 border-b border-stone-200/80">
           <div>
@@ -106,7 +115,34 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {!farmId && (
+        {/* Sneak Peak Overlay for non-logged in / non-subscribed users */}
+        {!isSubscribed && (
+          <div className="mb-10 bg-white border border-emerald-200/90 rounded-2xl p-8 shadow-xl text-center relative overflow-hidden">
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-100 rounded-full blur-2xl opacity-60 pointer-events-none" />
+            <div className="max-w-xl mx-auto space-y-4">
+              <span className="bg-emerald-100 text-emerald-900 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                🔒 Låst for besøkende — Sneak Peak Mode
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-serif text-stone-900 font-normal">
+                Prøv Barebonde gratis i 30 dager
+              </h2>
+              <p className="text-stone-600 text-sm">
+                Nedenfor ser du en demonstrasjon av kontrollpanelet. Opprett din konto og registrér gården din for å aktivere full tilgang til bilagsføring, MVA-rapporter og regnskap.
+              </p>
+
+              <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
+                <Button href="/farm/setup" variant="primary" showArrow>
+                  START 30 DAGERS GRATIS PRØVEPERIODE
+                </Button>
+                <Button href="/login" variant="secondary">
+                  LOGG INN MED E-POST
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!farmId && isSubscribed && (
           <Card hoverEffect={false} className="p-6 bg-white mb-10">
             <p className="text-sm text-stone-700">Sett opp gård først for å aktivere regnskap og bilag.</p>
           </Card>
@@ -124,34 +160,32 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {/* Metrics Grid */}
-        {farmId && !loading && !error && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+        {/* Metrics Grid with Sneak Peak Gating */}
+        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 ${!isSubscribed ? 'filter blur-[3px] select-none opacity-60 pointer-events-none' : ''}`}>
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Inngående penger</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.income)}</p>
-            <p className="text-xs text-stone-600 mt-1">Førte inntekter</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.income || 184500)}</p>
+            <p className="text-xs text-stone-600 mt-1">Førte inntekter (Demo)</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Utgående kostnader</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.expense)}</p>
-            <p className="text-xs text-stone-600 mt-1">Førte utgifter</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.expense || 42800)}</p>
+            <p className="text-xs text-stone-600 mt-1">Førte utgifter (Demo)</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">MVA-estimat</p>
-            <p className="text-3xl font-serif text-bonde-green font-bold">{money(vat.estimated_settlement)}</p>
-            <p className="text-xs text-stone-600 mt-1">Utgående minus inngående</p>
+            <p className="text-3xl font-serif text-bonde-green font-bold">{money(vat.estimated_settlement || 35420)}</p>
+            <p className="text-xs text-stone-600 mt-1">Utgående minus inngående (Demo)</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Aktive bilag</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">{journalCount}</p>
-            <p className="text-xs text-stone-600 mt-1">Registrerte bilag</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{journalCount || 14}</p>
+            <p className="text-xs text-stone-600 mt-1">Registrerte bilag (Demo)</p>
           </Card>
-          </div>
-        )}
+        </div>
 
         {/* Demo info banner */}
         <Card hoverEffect={false} className="p-8 border border-amber-200/80 bg-amber-50/60 rounded-2xl mb-10">
