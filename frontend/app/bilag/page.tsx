@@ -56,6 +56,8 @@ export default function BilagPage() {
       return
     }
 
+    const controller = new AbortController()
+
     const fetchVouchers = async () => {
       setLoading(true)
       setError('')
@@ -66,20 +68,24 @@ export default function BilagPage() {
         if (dateFrom) params.set('date_from', dateFrom)
         if (dateTo) params.set('date_to', dateTo)
 
-        const response = await fetch(`${API_BASE}/api/accounting/vouchers?${params.toString()}`)
+        const response = await fetch(`${API_BASE}/api/accounting/vouchers?${params.toString()}`, {
+          signal: controller.signal,
+        })
         if (!response.ok) {
           throw new Error('Klarte ikke hente bilag')
         }
         const data = (await response.json()) as Voucher[]
         setItems(data)
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
         setError(err instanceof Error ? err.message : 'Ukjent feil')
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) setLoading(false)
       }
     }
 
     fetchVouchers()
+    return () => controller.abort()
   }, [farmId, debouncedQuery, statusFilter, dateFrom, dateTo])
 
   const hasFilters = Boolean(searchQuery || statusFilter || dateFrom || dateTo)
