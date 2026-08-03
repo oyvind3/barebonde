@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { GoogleLoginButton } from '@/components/auth/GoogleLoginButton'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -57,6 +58,28 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* Google Sign-In Button */}
+            <GoogleLoginButton
+              onSuccess={() => {
+                // Google auth component handles redirect
+              }}
+              onError={(errorMsg) => {
+                setError(errorMsg)
+              }}
+              className="mb-6"
+            />
+
+            {/* Separator */}
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-stone-200"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-stone-600">eller</span>
+              </div>
+            </div>
+
+            {/* Email/Password Form */}
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
                 <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">

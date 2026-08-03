@@ -11,6 +11,8 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 python-dotenv==1.0.0
 email-validator>=2.0.0
+# Google OAuth token verification
+google-auth==2.27.0
 # Cosmos DB (NoSQL document database)
 azure-cosmos==4.16.3
 # Azure Blob Storage (bilag file uploads)
