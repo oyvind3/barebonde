@@ -60,7 +60,8 @@
 - [x] Document upload endpoint
 - [x] OCR text extraction service
 - [ ] Contract creation & eSignering integration
-- [ ] Document search & versioning
+- [x] Document search (bilag: filnavn, beskrivelse, konto, OCR, status og dato)
+- [ ] Document versioning
 
 ### Deadlines & Fritters
 - [ ] Deadline CRUD

@@ -1,7 +1,7 @@
 """Accounting routes for bilag upload, posting, and reports."""
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 import uuid
 
@@ -196,8 +196,20 @@ async def upload_voucher(
 
 
 @router.get("/vouchers", response_model=list[VoucherResponse])
-async def list_vouchers(farm_id: str = Query(...)) -> list[VoucherResponse]:
-    """List vouchers for a farm."""
+async def list_vouchers(
+    farm_id: str = Query(...),
+    q: str = Query(default="", max_length=200),
+    voucher_status: Optional[str] = Query(default=None, alias="status"),
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+) -> list[VoucherResponse]:
+    """List and filter vouchers for a farm."""
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fra-dato kan ikke være etter til-dato",
+        )
+
     query = "SELECT * FROM c WHERE c.farm_id = @farm_id AND c.type = 'voucher_document' ORDER BY c.created_at DESC"
     items = list(
         get_documents_container().query_items(
@@ -206,6 +218,17 @@ async def list_vouchers(farm_id: str = Query(...)) -> list[VoucherResponse]:
             enable_cross_partition_query=True,
         )
     )
+    items = [
+        item
+        for item in items
+        if _voucher_matches_filters(
+            item,
+            q=q,
+            voucher_status=voucher_status,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    ]
 
     return [
         VoucherResponse(
@@ -229,6 +252,41 @@ async def list_vouchers(farm_id: str = Query(...)) -> list[VoucherResponse]:
         )
         for item in items
     ]
+
+
+def _voucher_matches_filters(
+    item: dict[str, Any],
+    *,
+    q: str = "",
+    voucher_status: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> bool:
+    """Apply additive voucher filters after the farm-scoped Cosmos query."""
+    normalized_status = (voucher_status or "").strip().casefold()
+    item_status = str(item.get("status") or "mottatt").casefold()
+    if normalized_status and item_status != normalized_status:
+        return False
+
+    voucher_date = str(item.get("voucher_date") or "")
+    if date_from and voucher_date < date_from.isoformat():
+        return False
+    if date_to and voucher_date > date_to.isoformat():
+        return False
+
+    normalized_query = q.strip().casefold()
+    if not normalized_query:
+        return True
+
+    searchable_fields = (
+        item.get("file_name"),
+        item.get("description"),
+        item.get("account_code"),
+        item.get("ocr_suggested_supplier"),
+        item.get("ocr_text_preview"),
+    )
+    searchable_text = " ".join(str(value) for value in searchable_fields if value).casefold()
+    return normalized_query in searchable_text
 
 
 @router.post("/vouchers/{voucher_id}/book", response_model=VoucherResponse)

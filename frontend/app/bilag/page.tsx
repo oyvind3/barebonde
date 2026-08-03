@@ -28,6 +28,11 @@ export default function BilagPage() {
   const [items, setItems] = useState<Voucher[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
@@ -35,7 +40,18 @@ export default function BilagPage() {
   }, [])
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedQuery(searchQuery.trim()), 300)
+    return () => window.clearTimeout(timeout)
+  }, [searchQuery])
+
+  useEffect(() => {
     if (!farmId) {
+      setLoading(false)
+      return
+    }
+
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setError('Fra-dato kan ikke være etter til-dato')
       setLoading(false)
       return
     }
@@ -44,7 +60,13 @@ export default function BilagPage() {
       setLoading(true)
       setError('')
       try {
-        const response = await fetch(`${API_BASE}/api/accounting/vouchers?farm_id=${encodeURIComponent(farmId)}`)
+        const params = new URLSearchParams({ farm_id: farmId })
+        if (debouncedQuery) params.set('q', debouncedQuery)
+        if (statusFilter) params.set('status', statusFilter)
+        if (dateFrom) params.set('date_from', dateFrom)
+        if (dateTo) params.set('date_to', dateTo)
+
+        const response = await fetch(`${API_BASE}/api/accounting/vouchers?${params.toString()}`)
         if (!response.ok) {
           throw new Error('Klarte ikke hente bilag')
         }
@@ -58,7 +80,17 @@ export default function BilagPage() {
     }
 
     fetchVouchers()
-  }, [farmId])
+  }, [farmId, debouncedQuery, statusFilter, dateFrom, dateTo])
+
+  const hasFilters = Boolean(searchQuery || statusFilter || dateFrom || dateTo)
+
+  const clearFilters = () => {
+    setSearchQuery('')
+    setDebouncedQuery('')
+    setStatusFilter('')
+    setDateFrom('')
+    setDateTo('')
+  }
 
   const summary = useMemo(() => {
     const total = items.reduce((sum, item) => sum + (item.amount || 0), 0)
@@ -102,20 +134,89 @@ export default function BilagPage() {
           <>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
               <Card hoverEffect={false} className="p-5 bg-white">
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Bilag totalt</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-500">{hasFilters ? 'Treff' : 'Bilag totalt'}</p>
                 <p className="text-2xl font-serif text-stone-900 mt-1">{summary.count}</p>
               </Card>
               <Card hoverEffect={false} className="p-5 bg-white">
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Førte bilag</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-500">{hasFilters ? 'Førte i treff' : 'Førte bilag'}</p>
                 <p className="text-2xl font-serif text-stone-900 mt-1">{summary.booked}</p>
               </Card>
               <Card hoverEffect={false} className="p-5 bg-white">
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Sum ført</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-500">{hasFilters ? 'Sum treff' : 'Sum ført'}</p>
                 <p className="text-2xl font-serif text-stone-900 mt-1">
                   {new Intl.NumberFormat('nb-NO', { style: 'currency', currency: 'NOK', maximumFractionDigits: 0 }).format(summary.total)}
                 </p>
               </Card>
             </div>
+
+            <Card hoverEffect={false} className="p-5 bg-white mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="sm:col-span-2">
+                  <label htmlFor="voucher-search" className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">
+                    Søk i bilag
+                  </label>
+                  <input
+                    id="voucher-search"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Filnavn, beskrivelse, leverandør eller konto"
+                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900 focus:border-bonde-green focus:outline-none focus:ring-2 focus:ring-bonde-green/20"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="voucher-status" className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">
+                    Status
+                  </label>
+                  <select
+                    id="voucher-status"
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900 focus:border-bonde-green focus:outline-none focus:ring-2 focus:ring-bonde-green/20"
+                  >
+                    <option value="">Alle statuser</option>
+                    <option value="mottatt">Mottatt</option>
+                    <option value="ført">Ført</option>
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    disabled={!hasFilters}
+                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-semibold text-stone-700 hover:border-bonde-green hover:text-bonde-green disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Nullstill filtre
+                  </button>
+                </div>
+                <div>
+                  <label htmlFor="voucher-date-from" className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">
+                    Fra dato
+                  </label>
+                  <input
+                    id="voucher-date-from"
+                    type="date"
+                    value={dateFrom}
+                    max={dateTo || undefined}
+                    onChange={(event) => setDateFrom(event.target.value)}
+                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900 focus:border-bonde-green focus:outline-none focus:ring-2 focus:ring-bonde-green/20"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="voucher-date-to" className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">
+                    Til dato
+                  </label>
+                  <input
+                    id="voucher-date-to"
+                    type="date"
+                    value={dateTo}
+                    min={dateFrom || undefined}
+                    onChange={(event) => setDateTo(event.target.value)}
+                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900 focus:border-bonde-green focus:outline-none focus:ring-2 focus:ring-bonde-green/20"
+                  />
+                </div>
+              </div>
+            </Card>
 
             <Card hoverEffect={false} className="p-0 bg-white overflow-hidden">
               <div className="overflow-x-auto">
@@ -143,7 +244,9 @@ export default function BilagPage() {
                     )}
                     {!loading && !error && items.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="p-6 text-center text-stone-500">Ingen bilag ennå. Start med å registrere et bilag.</td>
+                        <td colSpan={6} className="p-6 text-center text-stone-500">
+                          {hasFilters ? 'Ingen bilag samsvarer med søket eller filtrene.' : 'Ingen bilag ennå. Start med å registrere et bilag.'}
+                        </td>
                       </tr>
                     )}
                     {!loading && !error && items.map((item) => (
