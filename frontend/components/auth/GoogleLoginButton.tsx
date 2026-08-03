@@ -37,7 +37,6 @@ declare global {
 export function GoogleLoginButton({
   onSuccess,
   onError,
-  disabled = false,
   className = '',
 }: GoogleLoginButtonProps) {
   const router = useRouter()
