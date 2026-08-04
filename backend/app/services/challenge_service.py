@@ -1,0 +1,74 @@
+"""One-time e-mail login challenges backed by Cosmos."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from azure.core import MatchConditions
+from azure.cosmos import exceptions
+
+from app.core.config import settings
+from app.core.security_tokens import challenge_identifier, new_opaque_token
+from app.db.cosmos_client import get_auth_challenges_container
+from app.services.identity_service import IdentityError, IdentityService, utc_now
+
+
+class InvalidChallengeError(IdentityError):
+    """The magic-link token is missing, expired, revoked, or already used."""
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+class ChallengeService:
+    def __init__(self, *, challenges_container: Any | None = None, identity_service: IdentityService | None = None):
+        self.challenges = challenges_container or get_auth_challenges_container()
+        self.identity = identity_service or IdentityService()
+
+    def create_email_login_challenge(self, *, email: str, first_name: str = "Bonde") -> str:
+        user = self.identity.resolve_email_identity(email=email, first_name=first_name)
+        raw_token = new_opaque_token()
+        challenge_id = challenge_identifier(raw_token)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.identity_magic_link_ttl_seconds)
+        self.challenges.create_item(
+            {
+                "id": challenge_id,
+                "type": "auth_challenge",
+                "challenge_partition_id": challenge_id,
+                "challenge_type": "email_login",
+                "user_id": user["user_id"],
+                "user_partition_key": self.identity.user_partition_key(user),
+                "created_at": utc_now(),
+                "expires_at": expires_at.isoformat(),
+                "consumed_at": None,
+            }
+        )
+        return raw_token
+
+    def consume_email_login_challenge(self, raw_token: str) -> dict[str, Any]:
+        challenge_id = challenge_identifier(raw_token)
+        try:
+            challenge = self.challenges.read_item(item=challenge_id, partition_key=challenge_id)
+        except exceptions.CosmosResourceNotFoundError as exc:
+            raise InvalidChallengeError("Innloggingslenken er ugyldig eller er allerede brukt.") from exc
+
+        expires_at = _parse_time(challenge.get("expires_at"))
+        if challenge.get("challenge_type") != "email_login" or challenge.get("consumed_at") or not expires_at or expires_at <= datetime.now(timezone.utc):
+            raise InvalidChallengeError("Innloggingslenken er utløpt eller allerede brukt.")
+
+        challenge["consumed_at"] = utc_now()
+        try:
+            self.challenges.replace_item(
+                item=challenge_id,
+                body=challenge,
+                etag=challenge.get("_etag"),
+                match_condition=MatchConditions.IfNotModified if challenge.get("_etag") else None,
+            )
+        except (exceptions.CosmosHttpResponseError, exceptions.CosmosResourceNotFoundError) as exc:
+            raise InvalidChallengeError("Innloggingslenken er allerede brukt.") from exc
+        return self.identity.get_user(challenge["user_id"], challenge["user_partition_key"])

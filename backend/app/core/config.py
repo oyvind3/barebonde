@@ -2,7 +2,7 @@
 Application configuration using Pydantic Settings
 """
 
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings
 
 
@@ -29,9 +29,18 @@ class Settings(BaseSettings):
     plunk_secret_api_key: str = ""
     plunk_public_api_key: str = ""
     
-    # Retained for the current API surface; server-managed sessions are planned.
+    # Retained while legacy code is gradually removed. Identity does not issue JWTs.
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
+
+    # Identity. Keep this independent from the legacy JWT key so token purposes
+    # cannot accidentally overlap. A missing value leaves health checks working
+    # but makes Identity endpoints fail closed with a configuration error.
+    identity_hmac_key: str = ""
+    identity_session_ttl_seconds: int = 60 * 60 * 24 * 7
+    identity_magic_link_ttl_seconds: int = 60 * 15
+    identity_cookie_name: str = "barebonde_session"
+    identity_cookie_secure: Optional[bool] = None
     
     # API
     api_port: int = 8000
@@ -43,6 +52,8 @@ class Settings(BaseSettings):
     cors_origins: List[str] = [
         "http://localhost:3000",
         "http://localhost:3001",
+        "https://barebonde.no",
+        "https://www.barebonde.no",
         "https://salmon-ocean-076260203.7.azurestaticapps.net",
     ]
     

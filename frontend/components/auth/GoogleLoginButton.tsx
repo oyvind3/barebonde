@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { API_BASE_URL } from '@/lib/api'
+import { API_BASE_URL, apiFetch, rememberCsrfToken } from '@/lib/api'
 
 export type GoogleUser = {
   user_id?: string
@@ -89,8 +89,8 @@ export function GoogleLoginButton({
         throw new Error('Ingen token mottatt fra Google.')
       }
 
-      const backendResponse = await fetch(
-        `${API_BASE_URL}/api/auth/${deferPersistence ? 'google/verify' : 'google'}`,
+      const backendResponse = await apiFetch(
+        `/api/auth/${deferPersistence ? 'google/verify' : 'google'}`,
         {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -102,12 +102,10 @@ export function GoogleLoginButton({
         throw new Error(userData.detail || 'Google-autentisering feilet på serveren.')
       }
 
+      if (!deferPersistence) rememberCsrfToken(userData.csrf_token)
       const user: GoogleUser = deferPersistence
         ? { ...userData, credential: response.credential, message: 'Google-identiteten er verifisert.' }
         : userData as GoogleUser
-      if (!deferPersistence) {
-        window.localStorage.setItem('user', JSON.stringify(user))
-      }
       onSuccessRef.current?.(user)
       if (!deferPersistence && redirectTo) router.push(redirectTo)
     } catch (err) {

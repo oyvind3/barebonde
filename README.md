@@ -14,9 +14,9 @@ Cloudflare- og Azure-konfigurasjon håndteres manuelt i MVP-en. Det er ikke plan
 
 ## Sikkerhetsstatus
 
-Dagens Google- og e-postflyt er en overgangsløsning og er **ikke produksjonsklar autentisering eller autorisering**. Den må ikke behandles som sikker identitets-, abonnements- eller rettighetskilde, og klientlagring er ikke en erstatning for serverstyrte sesjoner.
+Identity-MVP-en bruker verifiserte Google ID-token eller en e-postbasert engangslenke, serverstyrte ugjennomsiktige Cosmos-sesjoner, `HttpOnly`-cookie og CSRF-token. `GET /api/me` returnerer kun bruker- og sesjonsdata. Rå sesjonstoken, e-postadresser og Google-subjekter lagres ikke i Identity-oppslagsdokumenter.
 
-Før videre Identity-arbeid skal eksisterende Cosmos-containere valideres med et eksplisitt bootstrap-steg. Deretter er den planlagte retningen serverstyrte sesjoner i Cosmos, `HttpOnly`-cookie, CSRF-beskyttelse og en autoritativ `FarmUser`-medlemskapsmodell. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
+`IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-medlemskap, tenant-autorisering, abonnement og entitlements er fortsatt ikke implementert, og en aktiv sesjon gir derfor ikke autoritativ tilgang til gårdsdata ennå. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
 
 Et eventuelt tidligere Ory-prosjekt må slettes eller deaktiveres manuelt i Ory-konsollen; repositoryet kan ikke gjøre dette.
 
@@ -39,6 +39,8 @@ npm run dev
 
 Fyll kun lokale verdier i `backend/local.settings.json`; filen er ignorert av Git. Se `backend/.env.example` for miljøvariabler. Testene bruker mocks og skal ikke koble til Azure-ressurser.
 
+For Identity må lokal eller driftssatt konfigurasjon også ha en unik `IDENTITY_HMAC_KEY`. Ikke gjenbruk JWT- eller andre integrasjonshemmeligheter.
+
 ## Kvalitetskontroller
 
 ```bash
@@ -52,6 +54,16 @@ npm run lint
 npx tsc --noEmit
 npm run build
 ```
+
+## Cosmos-bootstrap
+
+Kjør manuelt fra repository-roten etter å ha satt lokale backend-miljøvariabler:
+
+```bash
+python backend/scripts/bootstrap_cosmos.py --dry-run
+```
+
+Skriptet kjører aldri ved Function App-start eller deploy. Se [Cosmos-bootstrap](./docs/COSMOS_BOOTSTRAP.md) for `--validate-only`, database-overstyring og sikkerhetsregler.
 
 ## Repositorystuktur
 
@@ -70,6 +82,8 @@ docs/architecture/       Arkitekturbeslutninger
 ## Dokumentasjon
 
 - [Arkitekturbeslutninger](./docs/architecture/adr.md)
+- [Cosmos-bootstrap](./docs/COSMOS_BOOTSTRAP.md)
+- [Identity-MVP](./docs/IDENTITY.md)
 - [Produktbacklog](./backlog/epics.md)
 - [Google-oppsett](./docs/GOOGLE_OAUTH_SETUP.md)
 - [Statusrapport](./STATUS_REPORT.md)
@@ -77,4 +91,4 @@ docs/architecture/       Arkitekturbeslutninger
 
 ## Neste planlagte fase
 
-`Eksplisitt Cosmos bootstrap og validering av eksisterende containere`.
+`Autoritativ FarmUser-tilknytning og tenant-autorisering`.

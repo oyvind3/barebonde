@@ -6,16 +6,23 @@ import html
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from google.auth.transport import requests
 from google.oauth2 import id_token
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, field_validator
 
-from app.db.cosmos_client import get_users_container
-from app.db.cosmos_models import User
+from app.api.dependencies.identity import CurrentIdentity, get_current_identity, require_csrf
+from app.api.identity_models import AuthenticatedResponse, SessionListResponse
+from app.api.routes.me import session_response, user_response
+from app.core.config import settings
+from app.core.security_tokens import IdentitySecurityConfigurationError
+from app.services.challenge_service import ChallengeService, InvalidChallengeError
+from app.services.identity_service import DisabledUserError, IdentityConflictError, IdentityError, IdentityService
+from app.services.session_service import InvalidSessionError, SessionService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -50,7 +57,6 @@ class RegisterRequest(BaseModel):
     first_name: str
     last_name: str
     email: EmailStr
-    password: Optional[str] = None
     google_token: Optional[str] = None
     phone_number: str
     address: Optional[str] = None
@@ -63,15 +69,6 @@ class RegisterRequest(BaseModel):
     def validate_phone_number(cls, value: str) -> str:
         return normalize_phone_number(value)
 
-    @model_validator(mode="after")
-    def validate_identity_method(self) -> "RegisterRequest":
-        has_password = bool((self.password or "").strip())
-        has_google_token = bool((self.google_token or "").strip())
-        if has_password == has_google_token:
-            raise ValueError("Velg enten passord eller Google-innlogging for registreringen.")
-        return self
-
-
 class AuthResponse(BaseModel):
     user_id: str
     email: str
@@ -83,14 +80,13 @@ class AuthResponse(BaseModel):
     phone_number: Optional[str] = None
 
 
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class MagicLinkRequest(BaseModel):
     email: EmailStr
     first_name: Optional[str] = "Bonde"
+
+
+class MagicLinkVerifyRequest(BaseModel):
+    token: str
 
 
 class GoogleTokenRequest(BaseModel):
@@ -101,15 +97,6 @@ class GoogleConfigResponse(BaseModel):
     client_id: str
 
 
-class GoogleAuthResponse(BaseModel):
-    user_id: str
-    email: str
-    first_name: str
-    last_name: str = ""
-    picture: Optional[str] = None
-    message: str
-
-
 class GoogleIdentityResponse(BaseModel):
     """Verified Google claims used to defer Cosmos persistence until onboarding ends."""
 
@@ -118,6 +105,7 @@ class GoogleIdentityResponse(BaseModel):
     first_name: str
     last_name: str = ""
     picture: Optional[str] = None
+    hosted_domain: Optional[str] = None
 
 
 def _get_plunk_config() -> tuple[str, str, str, Optional[str], str]:
@@ -192,30 +180,52 @@ def _frontend_url() -> str:
     return (os.getenv("FRONTEND_URL") or DEFAULT_FRONTEND_URL).rstrip("/")
 
 
+def _identity_cookie_options() -> dict[str, Any]:
+    """Use cross-site cookies in production and local-safe cookies in development."""
+    secure = settings.identity_cookie_secure
+    if secure is None:
+        secure = settings.env.casefold() not in {"development", "test", "local"}
+    return {
+        "key": settings.identity_cookie_name,
+        "httponly": True,
+        "secure": secure,
+        "samesite": "none" if secure else "lax",
+        "path": "/",
+        "max_age": settings.identity_session_ttl_seconds,
+    }
+
+
+def _set_session_cookie(response: Response, raw_session_token: str) -> None:
+    response.set_cookie(value=raw_session_token, **_identity_cookie_options())
+
+
+def _clear_session_cookie(response: Response) -> None:
+    options = _identity_cookie_options()
+    response.delete_cookie(
+        key=options["key"],
+        path=options["path"],
+        secure=options["secure"],
+        httponly=options["httponly"],
+        samesite=options["samesite"],
+    )
+
+
 async def _send_confirmation_email(email: str, first_name: str, *, is_resend: bool = False) -> None:
+    """Send the actual e-mail login link used by the passwordless MVP."""
+    # Fail before creating a reusable challenge if delivery is not configured.
+    _get_plunk_config()
     safe_name = html.escape(first_name or "Bonde")
-    action = "Du ba om å få bekreftelseslenken på nytt." if is_resend else "Takk for at du opprettet konto hos Barebonde."
+    raw_token = ChallengeService().create_email_login_challenge(email=email, first_name=first_name)
+    action = "Du ba om å få en ny innloggingslenke." if is_resend else "Takk for at du opprettet konto hos Barebonde."
     await _send_plunk_email(
         to=email,
-        subject="Bekreft din e-post for Barebonde",
+        subject="Din innloggingslenke til Barebonde",
         body=(
             f"<h1>Hei {safe_name}!</h1><p>{action}</p>"
-            f"<p><a href='{_frontend_url()}/dashboard'>Åpne Barebonde</a></p>"
+            f"<p><a href='{_frontend_url()}/login?token={raw_token}'>Logg inn i Barebonde</a></p>"
+            f"<p>Lenken kan brukes én gang og utløper om {settings.identity_magic_link_ttl_seconds // 60} minutter.</p>"
         ),
     )
-
-
-def _find_user(users_container: Any, field: str, value: str) -> Optional[dict[str, Any]]:
-    """Find one user without interpolating user-controlled values into Cosmos SQL."""
-    query = f"SELECT * FROM c WHERE c.{field} = @value"
-    users = list(
-        users_container.query_items(
-            query=query,
-            parameters=[{"name": "@value", "value": value}],
-            enable_cross_partition_query=True,
-        )
-    )
-    return users[0] if users else None
 
 
 def _google_identity_from_payload(payload: dict[str, Any]) -> GoogleIdentityResponse:
@@ -223,7 +233,7 @@ def _google_identity_from_payload(payload: dict[str, Any]) -> GoogleIdentityResp
     email = str(payload.get("email") or "").lower()
     if not google_id or not email:
         raise ValueError("Google-tokenet mangler brukeridentitet.")
-    if payload.get("email_verified") is False:
+    if payload.get("email_verified") is not True:
         raise ValueError("Google har ikke bekreftet e-postadressen.")
 
     return GoogleIdentityResponse(
@@ -232,6 +242,7 @@ def _google_identity_from_payload(payload: dict[str, Any]) -> GoogleIdentityResp
         first_name=str(payload.get("given_name") or payload.get("name") or "Bonde"),
         last_name=str(payload.get("family_name") or ""),
         picture=str(payload["picture"]) if payload.get("picture") else None,
+        hosted_domain=str(payload["hd"]) if payload.get("hd") else None,
     )
 
 
@@ -269,6 +280,8 @@ def _upsert_existing_user(
         user_data["picture"] = picture
     if phone_verified is not None:
         user_data["phone_verified"] = phone_verified
+    user_data["email_normalized"] = email.strip().casefold()
+    user_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     users_container.upsert_item(user_data)
     return user_data
@@ -279,7 +292,7 @@ async def resend_confirmation_email(req: MagicLinkRequest) -> dict[str, str]:
     """Resend a confirmation email and report actual provider failures to the UI."""
     try:
         await _send_confirmation_email(str(req.email), req.first_name or "Bonde", is_resend=True)
-    except EmailDeliveryError as exc:
+    except (EmailDeliveryError, IdentitySecurityConfigurationError, IdentityError) as exc:
         logger.warning("Confirmation resend failed: %s", exc)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
@@ -288,8 +301,11 @@ async def resend_confirmation_email(req: MagicLinkRequest) -> dict[str, str]:
 
 @router.post("/register")
 async def register_user(req: RegisterRequest) -> AuthResponse:
-    """Persist a complete onboarding profile after password or Google verification."""
-    users_container = get_users_container()
+    """Persist a profile during the existing multi-step farm onboarding.
+
+    This route is profile collection, not password authentication. Sign-in is
+    exclusively handled by Google or the one-time e-mail link endpoints below.
+    """
     email = str(req.email).lower()
     first_name = req.first_name.strip()
     last_name = req.last_name.strip()
@@ -307,54 +323,33 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
         last_name = google_identity.last_name
 
     try:
-        existing_by_google_id = (
-            _find_user(users_container, "google_id", google_identity.google_id) if google_identity else None
-        )
-        existing_by_email = _find_user(users_container, "email", email)
-        if existing_by_google_id and existing_by_email and existing_by_google_id["id"] != existing_by_email["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Google-kontoen er koblet til en annen Barebonde-bruker.",
-            )
-
-        existing = existing_by_google_id or existing_by_email
-        if existing and not google_identity:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="En bruker med denne e-postadressen finnes allerede.",
-            )
-
-        if existing:
-            user_data = _upsert_existing_user(
-                users_container,
-                existing,
+        identity_service = IdentityService()
+        if google_identity:
+            user_data = identity_service.resolve_google_identity(
+                google_id=google_identity.google_id,
                 email=email,
                 first_name=first_name,
                 last_name=last_name,
-                phone_number=req.phone_number,
-                address=address,
-                onboarding_role=onboarding_role,
-                google_id=google_identity.google_id if google_identity else None,
-                picture=google_identity.picture if google_identity else None,
+                picture=google_identity.picture,
+                hosted_domain=google_identity.hosted_domain,
             )
         else:
-            user = User(
-                email=email,
-                better_auth_id=f"google_{google_identity.google_id}" if google_identity else f"user_{email}",
-                first_name=first_name,
-                last_name=last_name,
-                google_id=google_identity.google_id if google_identity else None,
-                phone_number=req.phone_number,
-                address=address,
-                onboarding_role=onboarding_role,
-            )
-            user_data = user.to_dict()
-            if google_identity and google_identity.picture:
-                user_data["picture"] = google_identity.picture
-            users_container.upsert_item(user_data)
+            user_data = identity_service.resolve_email_identity(email=email, first_name=first_name)
+        user_data = _upsert_existing_user(
+            identity_service.users,
+            user_data,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            phone_number=req.phone_number,
+            address=address,
+            onboarding_role=onboarding_role,
+            google_id=google_identity.google_id if google_identity else None,
+            picture=google_identity.picture if google_identity else None,
+        )
+    except (IdentityConflictError, DisabledUserError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except Exception as exc:
-        if isinstance(exc, HTTPException):
-            raise
         logger.error("Failed saving onboarding user: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -400,50 +395,52 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
     )
 
 
-@router.post("/login")
-async def login_user(req: LoginRequest) -> AuthResponse:
-    """Authenticate an existing user in the current demo-mode flow."""
-    users_container = get_users_container()
-    email = str(req.email).lower()
-    query = f"SELECT * FROM c WHERE c.email = '{email}'"
-    users = list(users_container.query_items(query=query, enable_cross_partition_query=True))
-
-    if not users:
-        return AuthResponse(
-            user_id="demo-user-id",
-            email=email,
-            first_name="Bonde",
-            last_name="Bruker",
-            message="Innlogget i demo-modus",
-        )
-
-    user_data = users[0]
-    return AuthResponse(
-        user_id=user_data.get("id", "demo-id"),
-        email=user_data.get("email", email),
-        first_name=user_data.get("first_name", "Bonde"),
-        last_name=user_data.get("last_name", ""),
-        message="Vellykket innlogging",
-    )
-
-
 @router.post("/magic-link")
 async def send_magic_link(req: MagicLinkRequest) -> dict[str, str]:
-    """Send a magic-link style dashboard email through the same Plunk sender."""
+    """Create a single-use e-mail login challenge and submit it through Plunk."""
     try:
+        # Avoid persisting a valid challenge when no e-mail provider is configured.
+        _get_plunk_config()
+        raw_token = ChallengeService().create_email_login_challenge(
+            email=str(req.email), first_name=req.first_name or "Bonde"
+        )
+        login_url = f"{_frontend_url()}/login?token={raw_token}"
         await _send_plunk_email(
             to=str(req.email),
             subject="Din innloggingslenke til Barebonde",
             body=(
                 f"<h1>Logg inn på Barebonde</h1>"
-                f"<p><a href='{_frontend_url()}/dashboard'>Åpne dashboardet</a></p>"
+                f"<p><a href='{login_url}'>Logg inn i Barebonde</a></p>"
+                f"<p>Lenken kan brukes én gang og utløper om 15 minutter.</p>"
             ),
         )
-    except EmailDeliveryError as exc:
+    except (EmailDeliveryError, IdentitySecurityConfigurationError, IdentityError) as exc:
         logger.warning("Magic-link email was not sent: %s", exc)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     return {"status": "ok", "message": "Innloggingslenke sendt på e-post."}
+
+
+@router.post("/magic-link/verify", response_model=AuthenticatedResponse)
+async def verify_magic_link(req: MagicLinkVerifyRequest, response: Response) -> AuthenticatedResponse:
+    """Consume an e-mail challenge exactly once and start a server-managed session."""
+    if not req.token or not req.token.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Innloggingslenke mangler.")
+    try:
+        user = ChallengeService().consume_email_login_challenge(req.token)
+        raw_session_token, session = SessionService().create_session(user)
+    except InvalidChallengeError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except (IdentitySecurityConfigurationError, IdentityError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    _set_session_cookie(response, raw_session_token)
+    return AuthenticatedResponse(
+        **user_response(user).model_dump(),
+        session=session_response(session),
+        csrf_token=SessionService().csrf_token(raw_session_token),
+        message="Innlogging med e-postlenke var vellykket.",
+    )
 
 
 def _get_google_client_id() -> str:
@@ -475,9 +472,9 @@ async def verify_google_token(token: str) -> dict[str, Any]:
         raise ValueError("Google-tokenet er ugyldig eller utløpt.") from exc
 
 
-@router.post("/google", response_model=GoogleAuthResponse)
-async def google_auth(req: GoogleTokenRequest) -> GoogleAuthResponse:
-    """Verify Google login for an existing, completed Barebonde profile."""
+@router.post("/google", response_model=AuthenticatedResponse)
+async def google_auth(req: GoogleTokenRequest, response: Response) -> AuthenticatedResponse:
+    """Verify Google, resolve a stable user, then create an opaque session."""
     if not req.token or not req.token.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token er påkrevd.")
 
@@ -488,46 +485,31 @@ async def google_auth(req: GoogleTokenRequest) -> GoogleAuthResponse:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     try:
-        users_container = get_users_container()
-        existing_by_google_id = _find_user(users_container, "google_id", identity.google_id)
-        existing_by_email = _find_user(users_container, "email", identity.email)
-        if existing_by_google_id and existing_by_email and existing_by_google_id["id"] != existing_by_email["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Google-kontoen er koblet til en annen Barebonde-bruker.",
-            )
-        existing = existing_by_google_id or existing_by_email
-        if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Finner ikke en fullført Barebonde-konto. Fullfør gårdsoppsettet før du logger inn med Google.",
-            )
-
-        user_data = _upsert_existing_user(
-            users_container,
-            existing,
+        user_data = IdentityService().resolve_google_identity(
+            google_id=identity.google_id,
             email=identity.email,
             first_name=identity.first_name,
             last_name=identity.last_name,
-            google_id=identity.google_id,
             picture=identity.picture,
+            hosted_domain=identity.hosted_domain,
         )
-        user_id = str(user_data["id"])
-    except Exception as exc:
-        if isinstance(exc, HTTPException):
-            raise
+        raw_session_token, session = SessionService().create_session(user_data)
+    except IdentityConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except DisabledUserError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except (IdentitySecurityConfigurationError, IdentityError) as exc:
         logger.error("Could not persist Google user: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Google-innlogging lyktes, men brukeren kunne ikke lagres. Prøv igjen.",
         ) from exc
 
-    return GoogleAuthResponse(
-        user_id=user_id,
-        email=identity.email,
-        first_name=identity.first_name,
-        last_name=identity.last_name,
-        picture=identity.picture,
+    _set_session_cookie(response, raw_session_token)
+    return AuthenticatedResponse(
+        **user_response(user_data).model_dump(),
+        session=session_response(session),
+        csrf_token=SessionService().csrf_token(raw_session_token),
         message="Innlogget med Google.",
     )
 
@@ -542,3 +524,37 @@ async def verify_google_identity(req: GoogleTokenRequest) -> GoogleIdentityRespo
         return _google_identity_from_payload(await verify_google_token(req.token))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response, current: CurrentIdentity = Depends(require_csrf)) -> Response:
+    """Revoke only the current server-side session and expire its browser cookie."""
+    SessionService().revoke_session(user=current.user, session_id=current.session["id"])
+    _clear_session_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+def list_sessions(current: CurrentIdentity = Depends(get_current_identity)) -> SessionListResponse:
+    """List this user's non-revoked sessions without exposing secret token material."""
+    sessions = SessionService().list_sessions(current.user, current.raw_session_token)
+    return SessionListResponse(sessions=sessions)
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_session(
+    session_id: str, response: Response, current: CurrentIdentity = Depends(require_csrf)
+) -> Response:
+    """Revoke one of the current user's sessions; clearing cookie when it is current."""
+    service = SessionService()
+    try:
+        revoked = service.revoke_session(user=current.user, session_id=session_id)
+    except InvalidSessionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not revoked:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesjonen finnes ikke.")
+    if session_id == current.session["id"]:
+        _clear_session_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response

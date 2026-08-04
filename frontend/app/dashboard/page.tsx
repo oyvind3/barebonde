@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { API_BASE_URL, bootstrapIdentity } from '@/lib/api'
 
 type MonthlyRow = { month: string; income: number; expense: number; net: number }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const FARM_ID_KEY = 'barebonde_active_farm_id'
 
 export default function Dashboard() {
@@ -18,17 +18,14 @@ export default function Dashboard() {
   const [vat, setVat] = useState({ incoming_vat: 0, outgoing_vat: 0, estimated_settlement: 0 })
   const [journalCount, setJournalCount] = useState(0)
 
-  // Demo / guest check (Simulating gated subscription state)
-  const [isSubscribed, setIsSubscribed] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
     setFarmId(storedFarmId)
-    // Check if user is logged in & has active subscription
-    const user = window.localStorage.getItem('barebonde_user')
-    if (user || storedFarmId) {
-      setIsSubscribed(true)
-    }
+    bootstrapIdentity()
+      .then((identity) => setIsAuthenticated(Boolean(identity)))
+      .catch(() => setIsAuthenticated(false))
   }, [])
 
   useEffect(() => {
@@ -42,9 +39,9 @@ export default function Dashboard() {
       setError('')
       try {
         const [monthlyRes, vatRes, journalRes] = await Promise.all([
-          fetch(`${API_BASE}/api/accounting/reports/monthly?farm_id=${encodeURIComponent(farmId)}`),
-          fetch(`${API_BASE}/api/accounting/reports/vat?farm_id=${encodeURIComponent(farmId)}`),
-          fetch(`${API_BASE}/api/accounting/reports/journal?farm_id=${encodeURIComponent(farmId)}`),
+          fetch(`${API_BASE_URL}/api/accounting/reports/monthly?farm_id=${encodeURIComponent(farmId)}`, { credentials: 'include' }),
+          fetch(`${API_BASE_URL}/api/accounting/reports/vat?farm_id=${encodeURIComponent(farmId)}`, { credentials: 'include' }),
+          fetch(`${API_BASE_URL}/api/accounting/reports/journal?farm_id=${encodeURIComponent(farmId)}`, { credentials: 'include' }),
         ])
 
         if (!monthlyRes.ok || !vatRes.ok || !journalRes.ok) {
@@ -114,8 +111,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Sneak Peak Overlay for non-logged in / non-subscribed users */}
-        {!isSubscribed && (
+        {/* Preview shown until a server-managed session is present. */}
+        {!isAuthenticated && (
           <div className="mb-10 bg-white border border-emerald-200/90 rounded-2xl p-8 shadow-xl text-center relative overflow-hidden">
             <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-100 rounded-full blur-2xl opacity-60 pointer-events-none" />
             <div className="max-w-xl mx-auto space-y-4">
@@ -141,7 +138,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {!farmId && isSubscribed && (
+        {!farmId && isAuthenticated && (
           <Card hoverEffect={false} className="p-6 bg-white mb-10">
             <p className="text-sm text-stone-700">Sett opp gård først for å aktivere regnskap og bilag.</p>
           </Card>
@@ -160,7 +157,7 @@ export default function Dashboard() {
         )}
 
         {/* Metrics Grid with Sneak Peak Gating */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 ${!isSubscribed ? 'filter blur-[3px] select-none opacity-60 pointer-events-none' : ''}`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 ${!isAuthenticated ? 'filter blur-[3px] select-none opacity-60 pointer-events-none' : ''}`}>
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Inngående penger</p>
             <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.income || 184500)}</p>

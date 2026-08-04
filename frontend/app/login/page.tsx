@@ -1,36 +1,72 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { GoogleLoginButton } from '@/components/auth/GoogleLoginButton'
+import { apiFetch, rememberCsrfToken } from '@/lib/api'
 
 export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (!token) return
+
+    const completeMagicLinkLogin = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const response = await apiFetch('/api/auth/magic-link/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.detail || 'Innloggingslenken kunne ikke brukes.')
+        rememberCsrfToken(data.csrf_token)
+        router.replace('/dashboard')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Innloggingslenken kunne ikke brukes.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    completeMagicLinkLogin()
+  }, [router])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
-    if (!email || !password) {
-      setError('Vennligst oppgi e-postadresse og passord.')
+    if (!email) {
+      setError('Vennligst oppgi e-postadressen din.')
       setLoading(false)
       return
     }
-
-    // Simulate login / authenticate demo user
-    setTimeout(() => {
+    try {
+      const response = await apiFetch('/api/auth/magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.detail || 'Kunne ikke sende innloggingslenken.')
+      setMessage(data.message || 'Innloggingslenke sendt på e-post.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Kunne ikke sende innloggingslenken.')
+    } finally {
       setLoading(false)
-      router.push('/dashboard')
-    }, 600)
+    }
   }
 
   return (
@@ -48,13 +84,18 @@ export default function LoginPage() {
                 Velkommen tilbake
               </h1>
               <p className="text-stone-600 text-sm">
-                Logg inn med din e-postadresse og passord for å få tilgang til gården din.
+                Velg Google eller få en sikker engangslenke på e-post.
               </p>
             </div>
 
             {error && (
               <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-800 p-4 text-sm rounded-r-lg mb-6">
                 {error}
+              </div>
+            )}
+            {message && (
+              <div className="bg-emerald-50 border-l-4 border-emerald-500 text-emerald-800 p-4 text-sm rounded-r-lg mb-6">
+                {message}
               </div>
             )}
 
@@ -79,7 +120,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Email/Password Form */}
+            {/* E-mail one-time-link form */}
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
                 <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
@@ -96,24 +137,6 @@ export default function LoginPage() {
                 />
               </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label htmlFor="password" className="block text-xs font-bold uppercase tracking-wider text-stone-700">
-                    Passord *
-                  </label>
-                  <a href="#" className="text-xs text-bonde-green hover:underline">Glemt passord?</a>
-                </div>
-                <input
-                  type="password"
-                  id="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  placeholder="••••••••"
-                  className="w-full px-4 py-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bonde-green text-sm bg-white"
-                />
-              </div>
-
               <Button
                 type="submit"
                 disabled={loading}
@@ -121,7 +144,7 @@ export default function LoginPage() {
                 fullWidth
                 showArrow
               >
-                {loading ? 'LOGGER INN...' : 'LOGG INN'}
+                {loading ? 'SENDER...' : 'SEND INNLOGGINGSLENKE'}
               </Button>
             </form>
 

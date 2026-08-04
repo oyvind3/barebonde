@@ -86,8 +86,6 @@ export default function FarmSetupPage() {
   const [email, setEmail] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [onboardingRole, setOnboardingRole] = useState('owner')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
   const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null)
 
   const [paymentMethod, setPaymentMethod] = useState<'faktura' | 'vipps'>('faktura')
@@ -110,8 +108,6 @@ export default function FarmSetupPage() {
     setFirstName(user.first_name)
     setLastName(user.last_name)
     setEmail(user.email)
-    setPassword('')
-    setConfirmPassword('')
     setError(null)
   }
 
@@ -141,18 +137,6 @@ export default function FarmSetupPage() {
   const goToPayment = () => {
     if (!firstName.trim() || !lastName.trim() || !email.trim() || !phoneNumber.trim()) {
       setError('Fyll ut navn, e-postadresse og telefonnummer før du går videre.')
-      return
-    }
-    if (!googleUser && !password) {
-      setError('Velg Google eller opprett et passord for kontoen din.')
-      return
-    }
-    if (!googleUser && password.length < 6) {
-      setError('Passordet må bestå av minst 6 tegn.')
-      return
-    }
-    if (!googleUser && password !== confirmPassword) {
-      setError('Passordene er ikke like. Sjekk at begge er skrevet riktig.')
       return
     }
     setError(null)
@@ -189,7 +173,6 @@ export default function FarmSetupPage() {
         last_name: lastName.trim(),
         email: email.trim(),
         phone_number: phoneNumber.trim(),
-        password: googleUser ? undefined : password,
         google_token: googleUser?.credential,
         address: address.trim() || undefined,
         onboarding_role: onboardingRole,
@@ -454,12 +437,7 @@ export default function FarmSetupPage() {
                   </div>
                 </fieldset>
 
-                {!googleUser && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div><label className={labelClass} htmlFor="password">Lag et passord *</label><input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} className={inputClass} autoComplete="new-password" placeholder="Minst 6 tegn" /></div>
-                    <div><label className={labelClass} htmlFor="confirm-password">Gjenta passord *</label><input id="confirm-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={inputClass} autoComplete="new-password" placeholder="Gjenta passordet" /></div>
-                  </div>
-                )}
+                {!googleUser && <p className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">Du trenger ikke passord. Etter oppsettet får du en sikker engangslenke på e-post når du vil logge inn.</p>}
 
                 <div className="flex gap-3">
                   <Button type="button" variant="secondary" onClick={() => { setError(null); setStep('operations') }}>Tilbake</Button>
@@ -507,9 +485,9 @@ export default function FarmSetupPage() {
                 <div><h2 className="text-2xl font-semibold">Gårdsprofilen er klar</h2><p className="mt-2 text-sm text-stone-600">{emailStatus?.message || 'Du er klar til å ta i bruk Barebonde.'}</p></div>
                 {!googleUser && (
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-left text-sm text-stone-700">
-                    <p className="font-semibold">Bekreft e-postadressen din</p>
-                    {emailStatus?.sent ? <p className="mt-1 text-xs">Vi har sendt en lenke til {email}.</p> : <p className="mt-1 text-xs">E-posttjenesten kunne ikke bekrefte leveringen. Du kan prøve å sende på nytt.</p>}
-                    <button type="button" onClick={handleResendEmail} disabled={resendLoading} className="mt-3 text-sm font-medium text-bonde-green underline underline-offset-2 disabled:opacity-50">{resendLoading ? 'Sender...' : 'Send bekreftelse på nytt'}</button>
+                    <p className="font-semibold">Logg inn med e-postlenke</p>
+                    {emailStatus?.sent ? <p className="mt-1 text-xs">Vi har sendt en lenke til {email}. Bruk den for å logge inn.</p> : <p className="mt-1 text-xs">E-posttjenesten kunne ikke bekrefte leveringen. Du kan be om en ny lenke.</p>}
+                    <button type="button" onClick={handleResendEmail} disabled={resendLoading} className="mt-3 text-sm font-medium text-bonde-green underline underline-offset-2 disabled:opacity-50">{resendLoading ? 'Sender...' : 'Send innloggingslenke på nytt'}</button>
                     {resendMessage && <p className="mt-2 text-xs text-stone-600">{resendMessage}</p>}
                   </div>
                 )}

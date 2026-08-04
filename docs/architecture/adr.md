@@ -14,9 +14,11 @@ Azure Cosmos DB er dokumentdatabasen. Gårdsobjekter, brukerprofiler og gårdsti
 
 ## ADL-003: Identity og autorisering
 
-**Status:** Planlagt, ikke implementert
+**Status:** Delvis implementert
 
-Den nåværende Google- og e-postflyten er overgangsfunksjonalitet og ikke produksjonsklar autentisering. Neste sikkerhetsfase skal etablere serverstyrte sesjoner i Cosmos, `HttpOnly`-cookies, CSRF-beskyttelse og sentrale autoriseringsbeslutninger basert på `FarmUser`.
+Identity bruker Google ID-token og e-postbasert engangsinnlogging. Sesjoner er ugjennomsiktige, serverstyrte Cosmos-dokumenter; bare et tilfeldig token ligger i en `HttpOnly`-cookie. `identity_lookups` bruker HMAC-baserte, formålsbundne ID-er for e-post og Google-subjekt. `/api/me` eksponerer bare bruker og sesjon, og CSRF-token kreves for tilbakekalling og logout.
+
+`users` beholder den eksisterende `/better_auth_id`-partisjonsnøkkelen. FarmUser er ennå ikke en autoritativ medlemskaps- eller autoriseringskontroll, så Identity skal ikke brukes som tenant- eller abonnementsbeslutning før den modulen er laget.
 
 Ory/Kratos, Better Auth, SQLAlchemy, PostgreSQL og ID-porten er ikke del av målarkitekturen.
 
@@ -32,6 +34,12 @@ Regnskap og bilag er én modul, ikke hele produktet. Bilagsmetadata lagres i Cos
 
 Identity, organisasjoner, abonnement, entitlements og autorisering skal organiseres som moduler i den eksisterende Function App. De er ikke egne mikroservicer i MVP-en, men skal kunne skilles ut dersom drift eller skala senere krever det.
 
+## ADL-006: Eksplisitt Cosmos-bootstrap
+
+**Status:** Implementert
+
+Database- og containeropprettelse, samt partisjonsnøkkelvalidering, er flyttet ut av Function App-livssyklusen til `backend/scripts/bootstrap_cosmos.py`. Den sentrale definisjonen i `backend/app/db/cosmos_schema.py` brukes av både runtime og skriptet. Bootstrap er manuelt, idempotent og ikke-destruktivt: det oppretter bare manglende ressurser og feiler ved en eksisterende partisjonsnøkkelkonflikt.
+
 ## Neste arkitekturarbeid
 
-Før Identity implementeres: `Eksplisitt Cosmos bootstrap og validering av eksisterende containere`.
+`Autoritativ FarmUser-tilknytning og tenant-autorisering`.

@@ -3,7 +3,7 @@ Cosmos DB document models
 Replace SQLAlchemy models with JSON-based document structures
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from enum import Enum
 import uuid
@@ -32,10 +32,17 @@ class User:
         onboarding_role: Optional[str] = None,
         is_active: bool = True,
         id: Optional[str] = None,
-        created_at: Optional[datetime] = None
+        user_id: Optional[str] = None,
+        status: Optional[str] = None,
+        email_normalized: Optional[str] = None,
+        identity_version: int = 1,
+        created_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
     ):
         self.id = id or str(uuid.uuid4())
+        self.user_id = user_id or self.id
         self.email = email
+        self.email_normalized = email_normalized or email.strip().casefold()
         self.better_auth_id = better_auth_id  # Existing Cosmos partition key; retained for document compatibility.
         self.first_name = first_name
         self.last_name = last_name
@@ -45,7 +52,10 @@ class User:
         self.address = address
         self.onboarding_role = onboarding_role
         self.is_active = is_active
-        self.created_at = created_at or datetime.utcnow()
+        self.status = status or ("active" if is_active else "disabled")
+        self.identity_version = identity_version
+        self.created_at = created_at or datetime.now(timezone.utc)
+        self.updated_at = updated_at or self.created_at
         self.type = "user"  # Document type discriminator
     
     def to_dict(self) -> dict:
@@ -53,7 +63,10 @@ class User:
         return {
             "id": self.id,
             "type": self.type,
+            "user_id": self.user_id,
+            "status": self.status,
             "email": self.email,
+            "email_normalized": self.email_normalized,
             "better_auth_id": self.better_auth_id,
             "first_name": self.first_name,
             "last_name": self.last_name,
@@ -63,7 +76,9 @@ class User:
             "address": self.address,
             "onboarding_role": self.onboarding_role,
             "is_active": self.is_active,
-            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
+            "identity_version": self.identity_version,
+            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
+            "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
         }
     
     @staticmethod
@@ -71,7 +86,10 @@ class User:
         """Create from Cosmos DB document"""
         return User(
             id=data.get("id"),
+            user_id=data.get("user_id"),
+            status=data.get("status"),
             email=data.get("email"),
+            email_normalized=data.get("email_normalized"),
             better_auth_id=data.get("better_auth_id"),
             first_name=data.get("first_name"),
             last_name=data.get("last_name"),
@@ -81,7 +99,9 @@ class User:
             address=data.get("address"),
             onboarding_role=data.get("onboarding_role"),
             is_active=data.get("is_active", True),
-            created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None
+            identity_version=data.get("identity_version", 1),
+            created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None,
+            updated_at=datetime.fromisoformat(data.get("updated_at")) if data.get("updated_at") else None,
         )
 
 
