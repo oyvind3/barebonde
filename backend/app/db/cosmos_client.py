@@ -85,3 +85,8 @@ def get_auth_challenges_container() -> Any:
 
 def get_identity_lookups_container() -> Any:
     return get_container_client("identity_lookups")
+
+
+def get_subscriptions_container() -> Any:
+    """Return the existing Farm-partitioned subscription container proxy."""
+    return get_container_client("subscriptions")

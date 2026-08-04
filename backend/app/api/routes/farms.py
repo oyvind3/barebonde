@@ -23,6 +23,7 @@ from app.services.membership_service import (
     MembershipNotFoundError,
     MembershipService,
 )
+from app.services.subscription_service import SubscriptionService, SubscriptionUnavailableError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -236,6 +237,25 @@ def _write_audit_event(event_type: str, farm_id: str, user_id: str) -> None:
         logger.warning("Could not persist %s audit event for farm %s: %s", event_type, farm_id, exc)
 
 
+def _activate_provisioned_farm(*, service: MembershipService, farm: dict[str, Any], user_id: str) -> None:
+    """Assign the initial plan before making a Farm tenant active."""
+    try:
+        SubscriptionService().ensure_free_subscription(
+            farm_id=str(farm["id"]),
+            actor_user_id=user_id,
+        )
+    except SubscriptionUnavailableError as exc:
+        logger.error("Farm %s remains provisioning after subscription failure: %s", farm["id"], exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Gårdsoppsettet er under behandling. Prøv igjen.",
+        ) from exc
+
+    farm["farm_status"] = "active"
+    farm["updated_at"] = datetime.now(timezone.utc).isoformat()
+    service.farms.upsert_item(farm)
+
+
 @router.get("/search")
 async def search_companies(q: str) -> list[BrregLookupResponse]:
     """Search the public BRREG source; this is not a tenant data route."""
@@ -295,24 +315,20 @@ async def create_farm(
             membership = None
         if membership is not None:
             if existing.get("farm_status") == "provisioning":
-                existing["farm_status"] = "active"
-                existing["updated_at"] = datetime.now(timezone.utc).isoformat()
-                service.farms.upsert_item(existing)
+                _activate_provisioned_farm(service=service, farm=existing, user_id=user_id)
             return _farm_response(existing)
         if existing.get("farm_status") == "provisioning" and existing.get("created_by_user_id") == user_id:
             try:
                 service.create_owner_membership(farm=existing, user_id=user_id)
-                existing["farm_status"] = "active"
-                existing["updated_at"] = datetime.now(timezone.utc).isoformat()
-                service.farms.upsert_item(existing)
-                _write_audit_event("FarmMembershipCreated", existing["id"], user_id)
-                return _farm_response(existing)
             except MembershipError as exc:
                 logger.error("Farm provisioning retry failed for %s: %s", existing["id"], exc)
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Gårdsoppsettet er under behandling. Prøv igjen.",
                 ) from exc
+            _activate_provisioned_farm(service=service, farm=existing, user_id=user_id)
+            _write_audit_event("FarmMembershipCreated", existing["id"], user_id)
+            return _farm_response(existing)
         # Do not reveal that another tenant already owns this organization number.
         raise _not_found()
 
@@ -376,9 +392,7 @@ async def create_farm(
             detail="Gårdsoppsettet er under behandling. Prøv igjen.",
         ) from exc
 
-    document["farm_status"] = "active"
-    document["updated_at"] = datetime.now(timezone.utc).isoformat()
-    service.farms.upsert_item(document)
+    _activate_provisioned_farm(service=service, farm=document, user_id=user_id)
     _write_audit_event("FarmCreated", farm.id, user_id)
     _write_audit_event("FarmMembershipCreated", farm.id, user_id)
     return _farm_response(document)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.identity import CurrentIdentity, get_current_identity
 from app.api.identity_models import (
@@ -14,9 +14,12 @@ from app.api.identity_models import (
     MembershipResponse,
     MeResponse,
     SessionResponse,
+    subscription_response,
 )
+from app.services.entitlement_service import get_effective_entitlements
 from app.services.membership_service import MembershipService
 from app.services.session_service import SessionService
+from app.services.subscription_service import SubscriptionService, SubscriptionUnavailableError
 
 router = APIRouter()
 
@@ -82,6 +85,26 @@ def get_me(
     active_farm = next((item.farm for item in memberships if item.farm.id == active_farm_id), None)
     if active_farm is None and memberships:
         active_farm = memberships[0].farm
+
+    subscription = None
+    entitlements: dict[str, bool] = {}
+    if active_farm is not None:
+        # Membership was established above.  Only the selected active Farm is
+        # lazily initialized; this avoids an N+1 subscription write for users
+        # who belong to several Farms.
+        try:
+            ensured = SubscriptionService().ensure_free_subscription(
+                farm_id=active_farm.id,
+                actor_user_id=str(current.user["user_id"]),
+            )
+        except SubscriptionUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Abonnementstjenesten er midlertidig utilgjengelig. Prøv igjen.",
+            ) from exc
+        subscription = subscription_response(ensured.subscription)
+        entitlements = get_effective_entitlements(ensured.subscription)
+
     csrf_token = SessionService().csrf_token(current.raw_session_token)
     return MeResponse(
         user=user_response(current.user),
@@ -90,6 +113,6 @@ def get_me(
         csrf=CsrfResponse(token=csrf_token, expires_at=str(current.session["expires_at"])),
         memberships=memberships,
         active_farm=active_farm,
-        subscription=None,
-        entitlements={},
+        subscription=subscription,
+        entitlements=entitlements,
     )

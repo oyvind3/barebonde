@@ -16,11 +16,17 @@
 - [x] CSRF-beskyttelse og `/api/me` med bruker, sesjon og CSRF-token.
 - [x] Autoritativ `FarmUser`-medlemskapsmodell, roller og sentrale permissions for Farm-ruter.
 - [x] Tenant-isolerte Farm-ruter og servervalidert aktiv Farm i `/api/me`.
-- [ ] Abonnement, entitlements og usage per gård.
+- [x] Abonnement og entitlements per gård.
+- [ ] Usage per gård.
 - [x] Tenant-sikring av bilag, dokumentmetadata, bokføring, transaksjonslisting, rapporter og Blob-nedlasting.
 - [ ] Rate limiting, sikkerhetsgjennomgang og penetrasjonstest.
 
 E-postlenker er Identity-MVP, ikke en abonnementskilde. Ikke legg identitet eller rettigheter i `localStorage`; onboarding lagrer bare en kortvarig UX-kladd lokalt frem til e-postlenken er brukt. `IDENTITY_HMAC_KEY` må være satt før Identity-rutene aktiveres.
+
+## Subscription og entitlements
+
+- [x] Abonnement og entitlements per Farm med statiske, versjonerte planer og serverhåndhevet gate på avansert rapport.
+- [ ] Usage per Farm.
 
 ## Lokal kvalitetssjekk
 

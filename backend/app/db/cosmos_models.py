@@ -300,6 +300,83 @@ class FarmUser:
         )
 
 
+class Subscription:
+    """The single current subscription document for a Farm tenant."""
+
+    @staticmethod
+    def subscription_id(farm_id: str) -> str:
+        return f"subscription:{farm_id}"
+
+    def __init__(
+        self,
+        farm_id: str,
+        plan_code: str,
+        plan_version: str,
+        subscription_status: str = "active",
+        started_at: Optional[datetime] = None,
+        current_period_start: Optional[datetime] = None,
+        current_period_end: Optional[datetime] = None,
+        trial_ends_at: Optional[datetime] = None,
+        grace_period_ends_at: Optional[datetime] = None,
+        cancel_at_period_end: bool = False,
+        canceled_at: Optional[datetime] = None,
+        payment_provider: Optional[str] = None,
+        external_customer_id: Optional[str] = None,
+        external_subscription_id: Optional[str] = None,
+        version: int = 1,
+        id: Optional[str] = None,
+        created_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
+    ):
+        timestamp = datetime.now(timezone.utc)
+        self.id = id or self.subscription_id(farm_id)
+        self.type = "subscription"
+        self.farm_id = farm_id
+        self.plan_code = plan_code
+        self.plan_version = plan_version
+        self.subscription_status = subscription_status
+        self.started_at = started_at or timestamp
+        self.current_period_start = current_period_start
+        self.current_period_end = current_period_end
+        self.trial_ends_at = trial_ends_at
+        self.grace_period_ends_at = grace_period_ends_at
+        self.cancel_at_period_end = cancel_at_period_end
+        self.canceled_at = canceled_at
+        self.payment_provider = payment_provider
+        self.external_customer_id = external_customer_id
+        self.external_subscription_id = external_subscription_id
+        self.version = version
+        self.created_at = created_at or timestamp
+        self.updated_at = updated_at or self.created_at
+
+    @staticmethod
+    def _timestamp(value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if isinstance(value, datetime) else value
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "type": self.type,
+            "farm_id": self.farm_id,
+            "plan_code": self.plan_code,
+            "plan_version": self.plan_version,
+            "subscription_status": self.subscription_status,
+            "started_at": self._timestamp(self.started_at),
+            "current_period_start": self._timestamp(self.current_period_start),
+            "current_period_end": self._timestamp(self.current_period_end),
+            "trial_ends_at": self._timestamp(self.trial_ends_at),
+            "grace_period_ends_at": self._timestamp(self.grace_period_ends_at),
+            "cancel_at_period_end": self.cancel_at_period_end,
+            "canceled_at": self._timestamp(self.canceled_at),
+            "payment_provider": self.payment_provider,
+            "external_customer_id": self.external_customer_id,
+            "external_subscription_id": self.external_subscription_id,
+            "version": self.version,
+            "created_at": self._timestamp(self.created_at),
+            "updated_at": self._timestamp(self.updated_at),
+        }
+
+
 class Property:
     """Property document in Cosmos DB"""
     

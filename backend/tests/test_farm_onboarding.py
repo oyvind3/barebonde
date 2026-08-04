@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from app.api.dependencies import farm_access, identity as identity_dependency
 from app.api.routes import farms
 from app.core.permissions import permissions_for_role
 from app.services.membership_service import InactiveMembershipError, MembershipNotFoundError, membership_id
+from app.services.subscription_service import SubscriptionUnavailableError
 
 
 def make_client() -> TestClient:
@@ -36,6 +38,8 @@ class State:
     def __init__(self):
         self.farms = FarmStore()
         self.memberships = {}
+        self.subscriptions = {}
+        self.subscription_failure = False
 
 
 def configure_authenticated_user(monkeypatch, state, *, user_id="user-123"):
@@ -98,9 +102,27 @@ def configure_authenticated_user(monkeypatch, state, *, user_id="user-123"):
         def list_members_for_farm(self, farm_id):
             return [dict(item) for item in state.memberships.values() if item["farm_id"] == farm_id]
 
+    class FakeSubscriptionService:
+        def ensure_free_subscription(self, *, farm_id, actor_user_id=None):
+            if state.subscription_failure:
+                raise SubscriptionUnavailableError("subscription unavailable")
+            existing = state.subscriptions.get(farm_id)
+            if existing is not None:
+                return SimpleNamespace(subscription=dict(existing), created=False)
+            subscription = {
+                "id": f"subscription:{farm_id}",
+                "farm_id": farm_id,
+                "plan_code": "free",
+                "plan_version": "2026-08",
+                "subscription_status": "active",
+            }
+            state.subscriptions[farm_id] = subscription
+            return SimpleNamespace(subscription=dict(subscription), created=True)
+
     monkeypatch.setattr(identity_dependency, "SessionService", FakeSessionService)
     monkeypatch.setattr(farm_access, "MembershipService", FakeMembershipService)
     monkeypatch.setattr(farms, "MembershipService", FakeMembershipService)
+    monkeypatch.setattr(farms, "SubscriptionService", FakeSubscriptionService)
     monkeypatch.setattr(farms, "get_farms_container", lambda: state.farms)
     monkeypatch.setattr(farms, "_write_audit_event", lambda *_: None)
 
@@ -167,6 +189,7 @@ def test_create_farm_derives_owner_from_session_ignores_onboarding_header_and_re
     assert first.json()["city"] == "Nes på Hedmarken"
     owner = state.memberships[membership_id("farm:123456789", "user-123")]
     assert owner["farm_role"] == "owner"
+    assert state.subscriptions["farm:123456789"]["plan_code"] == "free"
     assert all(item["user_id"] != "attacker" for item in state.memberships.values())
     assert "demo-user" not in str(state.memberships)
 
@@ -200,6 +223,53 @@ def test_authorized_retry_completes_a_provisioning_farm(monkeypatch):
     assert response.status_code == 200
     assert state.farms.items["farm:123456789"]["farm_status"] == "active"
     assert membership_id("farm:123456789", "user-123") in state.memberships
+    assert state.subscriptions["farm:123456789"]["subscription_status"] == "active"
+
+
+def test_subscription_failure_keeps_farm_provisioning_and_authorized_retry_completes(monkeypatch):
+    state = State()
+    state.subscription_failure = True
+    configure_authenticated_user(monkeypatch, state)
+    monkeypatch.setattr(farms.brreg_service, "lookup_org", brreg_farm)
+    client = make_client()
+
+    failed = authenticated_post(client, "/api/farms", json=valid_payload())
+
+    assert failed.status_code == 503
+    assert state.farms.items["farm:123456789"]["farm_status"] == "provisioning"
+    assert membership_id("farm:123456789", "user-123") in state.memberships
+    assert state.subscriptions == {}
+
+    state.subscription_failure = False
+    completed = authenticated_post(client, "/api/farms", json=valid_payload())
+
+    assert completed.status_code == 200
+    assert state.farms.items["farm:123456789"]["farm_status"] == "active"
+    assert state.subscriptions["farm:123456789"]["plan_code"] == "free"
+
+
+def test_provisioning_retry_keeps_existing_non_free_subscription(monkeypatch):
+    state = State()
+    state.farms.items["farm:123456789"] = {
+        "id": "farm:123456789",
+        "org_number": "123456789",
+        "name": "Solberg gård",
+        "farm_status": "provisioning",
+        "created_by_user_id": "user-123",
+    }
+    state.subscriptions["farm:123456789"] = {
+        "id": "subscription:farm:123456789",
+        "farm_id": "farm:123456789",
+        "plan_code": "premium",
+        "plan_version": "2026-08",
+        "subscription_status": "active",
+    }
+    configure_authenticated_user(monkeypatch, state)
+
+    response = authenticated_post(make_client(), "/api/farms", json=valid_payload())
+
+    assert response.status_code == 200
+    assert state.subscriptions["farm:123456789"]["plan_code"] == "premium"
 
 
 def test_get_list_patch_and_members_are_tenant_isolated(monkeypatch):

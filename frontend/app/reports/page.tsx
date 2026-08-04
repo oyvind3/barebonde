@@ -16,6 +16,8 @@ export default function ReportsPage() {
   const [farmId, setFarmId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [identityLoaded, setIdentityLoaded] = useState(false)
+  const [entitlements, setEntitlements] = useState<Record<string, boolean>>({})
 
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
   const [vat, setVat] = useState({ incoming_vat: 0, outgoing_vat: 0, estimated_settlement: 0 })
@@ -32,17 +34,21 @@ export default function ReportsPage() {
     bootstrapIdentity(storedFarmId)
       .then((identity) => {
         const activeFarmId = identity?.active_farm?.id || ''
+        setEntitlements(identity?.entitlements || {})
         setFarmId(activeFarmId)
         if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
         else window.localStorage.removeItem(FARM_ID_KEY)
       })
       .catch(() => {
         setError('Kunne ikke hente den aktive gården.')
+        setEntitlements({})
         setFarmId('')
       })
+      .finally(() => setIdentityLoaded(true))
   }, [])
 
   useEffect(() => {
+    if (!identityLoaded) return
     if (!farmId) {
       setLoading(false)
       return
@@ -52,16 +58,15 @@ export default function ReportsPage() {
       setLoading(true)
       setError('')
       try {
-        const [monthlyRes, vatRes, grantsRes, journalRes, liquidityRes] = await Promise.all([
+        const [monthlyRes, vatRes, grantsRes, journalRes] = await Promise.all([
           apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/monthly`),
           apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/vat`),
           apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/grants`),
           apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/journal`),
-          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/liquidity?opening_balance=0`),
         ])
 
-        if (!monthlyRes.ok || !vatRes.ok || !grantsRes.ok || !journalRes.ok || !liquidityRes.ok) {
-          const failedResponse = [monthlyRes, vatRes, grantsRes, journalRes, liquidityRes].find((response) => !response.ok)
+        if (!monthlyRes.ok || !vatRes.ok || !grantsRes.ok || !journalRes.ok) {
+          const failedResponse = [monthlyRes, vatRes, grantsRes, journalRes].find((response) => !response.ok)
           throw new Error(await apiErrorMessage(failedResponse!, 'Klarte ikke hente rapportdata'))
         }
 
@@ -69,13 +74,20 @@ export default function ReportsPage() {
         const vatData = await vatRes.json()
         const grantsData = await grantsRes.json()
         const journalData = await journalRes.json()
-        const liquidityData = await liquidityRes.json()
+        let liquidityData = null
+        if (entitlements['reports.advanced.enabled']) {
+          const liquidityResponse = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/liquidity?opening_balance=0`)
+          if (!liquidityResponse.ok) {
+            throw new Error(await apiErrorMessage(liquidityResponse, 'Klarte ikke hente likviditetsrapport'))
+          }
+          liquidityData = await liquidityResponse.json()
+        }
 
         setMonthly(monthlyData.rows || [])
         setVat(vatData)
         setGrants(grantsData.rows || [])
         setJournal(journalData.rows || [])
-        setLiquidity(liquidityData)
+        setLiquidity(liquidityData || { opening_balance: 0, closing_balance: 0, points: [] })
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Ukjent feil')
       } finally {
@@ -84,7 +96,7 @@ export default function ReportsPage() {
     }
 
     run()
-  }, [farmId])
+  }, [entitlements, farmId, identityLoaded])
 
   const money = (value: number) =>
     new Intl.NumberFormat('nb-NO', { style: 'currency', currency: 'NOK', maximumFractionDigits: 0 }).format(value)
@@ -218,29 +230,41 @@ export default function ReportsPage() {
 
             <Card hoverEffect={false} className="p-6 bg-white">
               <h2 className="text-lg font-semibold text-stone-900 mb-3">Likviditetsoversikt</h2>
-              <p className="text-sm text-stone-700 mb-4">
-                Startsaldo: {money(liquidity.opening_balance)} | Sluttsaldo: {money(liquidity.closing_balance)}
-              </p>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-stone-200">
-                      <th className="text-left p-2">Dato</th>
-                      <th className="text-left p-2">Beskrivelse</th>
-                      <th className="text-left p-2">Balanse</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {liquidity.points.map((point, index) => (
-                      <tr key={`${point.date}-${index}`} className="border-b border-stone-100">
-                        <td className="p-2">{point.date}</td>
-                        <td className="p-2">{point.description}</td>
-                        <td className="p-2">{money(point.balance)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {entitlements['reports.advanced.enabled'] ? (
+                <>
+                  <p className="text-sm text-stone-700 mb-4">
+                    Startsaldo: {money(liquidity.opening_balance)} | Sluttsaldo: {money(liquidity.closing_balance)}
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-stone-200">
+                          <th className="text-left p-2">Dato</th>
+                          <th className="text-left p-2">Beskrivelse</th>
+                          <th className="text-left p-2">Balanse</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liquidity.points.map((point, index) => (
+                          <tr key={`${point.date}-${index}`} className="border-b border-stone-100">
+                            <td className="p-2">{point.date}</td>
+                            <td className="p-2">{point.description}</td>
+                            <td className="p-2">{money(point.balance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg bg-stone-50 p-4 text-sm text-stone-700">
+                  <p className="font-semibold text-stone-900">Tilgjengelig med Standard eller Premium</p>
+                  <p className="mt-1">Denne funksjonen krever Standard eller Premium.</p>
+                  <button type="button" disabled className="mt-3 cursor-not-allowed rounded border border-stone-300 px-3 py-1 text-xs font-semibold text-stone-500">
+                    Kommer snart
+                  </button>
+                </div>
+              )}
             </Card>
           </div>
         )}

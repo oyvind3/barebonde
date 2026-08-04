@@ -20,6 +20,8 @@ export default function Dashboard() {
 
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [memberships, setMemberships] = useState<IdentityBootstrap['memberships']>([])
+  const [subscription, setSubscription] = useState<IdentityBootstrap['subscription']>(null)
+  const [entitlements, setEntitlements] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
@@ -27,6 +29,8 @@ export default function Dashboard() {
       .then((identity) => {
         setIsAuthenticated(Boolean(identity))
         setMemberships(identity?.memberships || [])
+        setSubscription(identity?.subscription || null)
+        setEntitlements(identity?.entitlements || {})
         const activeFarmId = identity?.active_farm?.id || ''
         setFarmId(activeFarmId)
         if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
@@ -35,15 +39,25 @@ export default function Dashboard() {
       .catch(() => {
         setIsAuthenticated(false)
         setMemberships([])
+        setSubscription(null)
+        setEntitlements({})
         setFarmId('')
       })
   }, [])
 
-  const selectFarm = (nextFarmId: string) => {
+  const selectFarm = async (nextFarmId: string) => {
     const isMember = memberships.some((membership) => membership.farm.id === nextFarmId)
     if (!isMember) return
     window.localStorage.setItem(FARM_ID_KEY, nextFarmId)
     setFarmId(nextFarmId)
+    try {
+      const identity = await bootstrapIdentity(nextFarmId)
+      setSubscription(identity?.subscription || null)
+      setEntitlements(identity?.entitlements || {})
+    } catch {
+      setSubscription(null)
+      setEntitlements({})
+    }
   }
 
   useEffect(() => {
@@ -186,6 +200,24 @@ export default function Dashboard() {
         {farmId && error && (
           <Card hoverEffect={false} className="p-6 bg-white mb-10">
             <p className="text-sm text-red-700">{error}</p>
+          </Card>
+        )}
+
+        {isAuthenticated && farmId && subscription && (
+          <Card hoverEffect={false} className="mb-8 flex flex-col gap-3 border border-emerald-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Aktiv plan</p>
+              <p className="mt-1 text-lg font-semibold text-stone-900">{subscription.display_name}</p>
+            </div>
+            {!entitlements['reports.advanced.enabled'] && (
+              <div className="max-w-md rounded-lg bg-stone-50 px-4 py-3 text-sm text-stone-700">
+                <p className="font-semibold text-stone-900">Likviditetsoversikt er låst</p>
+                <p>Denne funksjonen krever Standard eller Premium.</p>
+                <button type="button" disabled className="mt-2 cursor-not-allowed rounded border border-stone-300 px-3 py-1 text-xs font-semibold text-stone-500">
+                  Kommer snart
+                </button>
+              </div>
+            )}
           </Card>
         )}
 

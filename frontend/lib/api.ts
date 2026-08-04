@@ -42,7 +42,19 @@ export type IdentityBootstrap = {
     org_number: string
     farm_status: string
   } | null
-  subscription: null
+  subscription: {
+    plan_code: string
+    plan_version: string
+    display_name: string
+    subscription_status: string
+    started_at?: string | null
+    current_period_start?: string | null
+    current_period_end?: string | null
+    trial_ends_at?: string | null
+    grace_period_ends_at?: string | null
+    cancel_at_period_end: boolean
+    canceled_at?: string | null
+  } | null
   entitlements: Record<string, boolean>
 }
 

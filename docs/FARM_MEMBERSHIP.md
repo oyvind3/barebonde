@@ -22,8 +22,14 @@ Farm-avgrensede ruter bruker den serverstyrte sesjonen til å hente brukeren og 
 
 `GET /api/me` inneholder aktive medlemskap og en validert `active_farm`. Frontend kan lagre sist valgte Farm lokalt bare som en UX-preferanse; den bestemmer aldri tilgang, rolle eller identitet.
 
+## Subscription og medlemskap
+
+Farm eier abonnementet, mens `FarmUser` avgjør hvilken bruker som kan utføre en handling. `POST /api/farms` følger rekkefølgen `provisioning Farm -> owner FarmUser -> free Subscription -> active Farm`. Hvis Subscription ikke kan opprettes, blir Farm stående i `provisioning` slik at samme autoriserte oppretter kan prøve på nytt. En eksisterende Subscription, også `standard` eller `premium`, overskrives aldri med `free`.
+
+`GET /api/me` initialiserer bare den valgte aktive Farmens manglende abonnement etter at medlemskapet er validert. `GET /api/farms/{farm_id}/subscription` krever `subscription.read`, mens `GET /api/farms/{farm_id}/entitlements` krever aktivt medlemskap. Se [Abonnement og entitlements](./SUBSCRIPTIONS.md) for planene og statuspolicyen.
+
 ## Avgrensninger
 
-Farm-opprettelse, Farm-lesing/-endring, medlemsliste, bilag, dokumentmetadata, bokføring, transaksjonslisting, rapporter og Blob-nedlasting er tenant-sikret. Se [Tenant-sikring av regnskap og dokumenter](./TENANT_ACCOUNTING.md) for ruter, ressurskontroll og Blob-modell. Subscription, entitlements, usage, invitasjoner, rolleendring og eierskapsoverføring er ikke implementert.
+Farm-opprettelse, Farm-lesing/-endring, medlemsliste, bilag, dokumentmetadata, bokføring, transaksjonslisting, rapporter og Blob-nedlasting er tenant-sikret. Se [Tenant-sikring av regnskap og dokumenter](./TENANT_ACCOUNTING.md) for ruter, ressurskontroll og Blob-modell. Usage, invitasjoner, rolleendring og eierskapsoverføring er ikke implementert.
 
 Medlemskap hentes med en begrenset cross-partition-spørring for `/api/me`. Dette er bevisst enkelt i MVP-en og må RU-måles før det optimaliseres med en ny projeksjon.

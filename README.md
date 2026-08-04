@@ -16,9 +16,13 @@ Cloudflare- og Azure-konfigurasjon håndteres manuelt i MVP-en. Det er ikke plan
 
 Identity-MVP-en bruker e-postbaserte engangslenker, serverstyrte ugjennomsiktige Cosmos-sesjoner, `HttpOnly`-cookie og CSRF-token. Onboarding bekrefter e-postadressen før betalingsvalg og gårdsopprettelse. `Farm` er tenant-modellen, og en aktiv `FarmUser`-tilknytning er den autoritative kilden til tilgang. `GET /api/me` returnerer bruker, sesjon, CSRF-token, aktive medlemskap og en validert aktiv gård. Rå sesjonstoken og e-postadresser lagres ikke i Identity-oppslagsdokumenter.
 
-`IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-, bilags-, dokument-, transaksjons- og rapport-ruter er medlemskaps- og permission-beskyttet. Beskyttede Blob-filer lastes ned via autorisert API-streaming, ikke varige Blob-URL-er. Abonnement og entitlements er ikke implementert. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
+`IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-, bilags-, dokument-, transaksjons- og rapport-ruter er medlemskaps- og permission-beskyttet. Beskyttede Blob-filer lastes ned via autorisert API-streaming, ikke varige Blob-URL-er. Farm eier ett statisk, versjonert abonnement med effektive entitlements beregnet server-side. Usage og betaling er ikke implementert. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
 
 Et eventuelt tidligere Ory-prosjekt må slettes eller deaktiveres manuelt i Ory-konsollen; repositoryet kan ikke gjøre dette.
+
+## Abonnement og tilgang
+
+Hver Farm har ett abonnement i `subscriptions` med partisjonsnøkkel `/farm_id`. Planene `free`, `standard` og `premium` er statiske og versjonerte i backend. Nye Farms får `free` før de aktiveres, og `/api/me` initialiserer bare aktiv eksisterende Farm når abonnement mangler. Frontend får en sikker plan- og entitlement-projeksjon fra `/api/me`, mens API-et kontrollerer den på nytt. Usage og betaling er ikke implementert.
 
 ## Lokal utvikling
 
@@ -86,6 +90,7 @@ docs/architecture/       Arkitekturbeslutninger
 - [Identity-MVP](./docs/IDENTITY.md)
 - [Farm-medlemskap og tenant-isolasjon](./docs/FARM_MEMBERSHIP.md)
 - [Tenant-sikring av regnskap og dokumenter](./docs/TENANT_ACCOUNTING.md)
+- [Abonnement og entitlements](./docs/SUBSCRIPTIONS.md)
 - [Produktbacklog](./backlog/epics.md)
 - [Statusrapport](./STATUS_REPORT.md)
 - [Sjekkliste](./CHECKLIST.md)

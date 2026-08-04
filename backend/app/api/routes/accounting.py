@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.api.dependencies.entitlements import AuthorizedEntitlement, require_entitlement
 from app.api.dependencies.farm_access import AuthorizedFarm, require_farm_permission
 from app.core.permissions import Permission
 from app.db.cosmos_client import (
@@ -621,7 +622,13 @@ async def report_journal(
 async def report_liquidity(
     farm_id: str,
     opening_balance: float = Query(default=0.0),
-    _: AuthorizedFarm = Depends(require_farm_permission(Permission.REPORT_BASIC_READ)),
+    _: AuthorizedEntitlement = Depends(
+        require_entitlement(
+            "reports.advanced.enabled",
+            permission=Permission.REPORT_ADVANCED_READ,
+            access_mode="read",
+        )
+    ),
 ) -> dict[str, Any]:
     balance = opening_balance
     points = []

@@ -10,9 +10,14 @@
 - `GET /api/farms/{farm_id}/documents` og `GET /api/farms/{farm_id}/documents/{document_id}`: `document.read`.
 - `GET /api/farms/{farm_id}/documents/{document_id}/download`: `document.download`.
 - `GET /api/farms/{farm_id}/transactions`: `transaction.read`.
-- `GET /api/farms/{farm_id}/reports/{monthly|vat|grants|journal|liquidity}`: `report.basic.read`.
+- `GET /api/farms/{farm_id}/reports/{monthly|vat|grants|journal}`: `report.basic.read`.
+- `GET /api/farms/{farm_id}/reports/liquidity`: `report.advanced.read` og `reports.advanced.enabled`.
 
 `/api/accounting/accounts` er fortsatt et offentlig, statisk oppslagsendepunkt og inneholder ingen tenant-data. De tidligere globale `/api/accounting/vouchers...`- og `/api/accounting/reports...`-rutene er fjernet; frontend bruker bare Farm-scopede paths.
+
+## Permission og entitlement
+
+Likviditetsrapporten `GET /api/farms/{farm_id}/reports/liquidity` er den første avanserte rapporten. Serveren kontrollerer først `report.advanced.read` fra FarmUser-rollen og deretter Farmens Subscription-status og `reports.advanced.enabled`. En `staff`-bruker blir dermed stoppet før Subscription leses, mens owner på `free` får entitlement-avslag. Måneds-, MVA-, tilskudds- og journalrapportene er fortsatt grunnrapporter på `free`.
 
 ## Ressurser og Cosmos
 
