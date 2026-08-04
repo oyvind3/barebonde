@@ -98,3 +98,8 @@ def get_farm_settings_container() -> Any:
 
 def get_bank_accounts_container() -> Any:
     return get_container_client("bank_accounts")
+
+
+def get_farm_invitations_container() -> Any:
+    """Return the existing Farm-partitioned invitation container proxy."""
+    return get_container_client("farm_invitations")

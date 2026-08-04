@@ -24,6 +24,7 @@ from app.services.membership_service import (
     MembershipService,
 )
 from app.services.subscription_service import SubscriptionService, SubscriptionUnavailableError
+from app.services.invitation_service import InvitationConflictError, InvitationError, InvitationService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -164,6 +165,22 @@ class FarmMemberResponse(BaseModel):
     farm_role: str
     membership_status: str
     created_at: Optional[str] = None
+
+
+class InvitationCreateRequest(BaseModel):
+    email: EmailStr
+    role: str
+
+
+class InvitationResponse(BaseModel):
+    id: str
+    email: str
+    invited_role: str
+    invitation_status: str
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    last_sent_at: Optional[str] = None
+    send_count: int = 0
 
 
 class BrregLookupResponse(BaseModel):
@@ -425,6 +442,36 @@ def list_farm_members(
         )
         for member in service.list_members_for_farm(farm_id)
     ]
+
+
+@router.get("/{farm_id}/invitations", response_model=list[InvitationResponse])
+def list_farm_invitations(
+    farm_id: str,
+    _: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_INVITATION_LIST)),
+) -> list[InvitationResponse]:
+    service = InvitationService()
+    return [InvitationResponse(**service.public_metadata(item)) for item in service.list_invitations(farm_id)]
+
+
+@router.post("/{farm_id}/invitations", response_model=InvitationResponse, status_code=status.HTTP_201_CREATED)
+def create_farm_invitation(
+    farm_id: str,
+    request: InvitationCreateRequest,
+    access: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_INVITE, require_csrf_protection=True)),
+) -> InvitationResponse:
+    try:
+        invitation, _ = InvitationService().create_invitation(
+            farm=access.farm,
+            email=str(request.email),
+            role=request.role,
+            actor_user_id=str(access.current.user["user_id"]),
+        )
+    except InvitationConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except InvitationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    _write_audit_event("FarmInvitationCreated", farm_id, access.current.user["user_id"])
+    return InvitationResponse(**InvitationService().public_metadata(invitation))
 
 
 @router.patch("/{farm_id}", response_model=FarmResponse)
