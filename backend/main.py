@@ -30,7 +30,7 @@ app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(me.router, prefix="/api", tags=["Identity"])
 app.include_router(farms.router, prefix="/api/farms", tags=["Farms"])
-app.include_router(accounting.router, prefix="/api/accounting", tags=["Accounting"])
+app.include_router(accounting.router, tags=["Accounting"])
 
 
 @app.get("/")

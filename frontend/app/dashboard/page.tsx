@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { API_BASE_URL, bootstrapIdentity, IdentityBootstrap } from '@/lib/api'
+import { apiErrorMessage, apiFetch, bootstrapIdentity, IdentityBootstrap } from '@/lib/api'
 
 type MonthlyRow = { month: string; income: number; expense: number; net: number }
 
@@ -52,35 +52,41 @@ export default function Dashboard() {
       return
     }
 
+    const controller = new AbortController()
     const fetchData = async () => {
       setLoading(true)
       setError('')
       try {
         const [monthlyRes, vatRes, journalRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/accounting/reports/monthly?farm_id=${encodeURIComponent(farmId)}`, { credentials: 'include' }),
-          fetch(`${API_BASE_URL}/api/accounting/reports/vat?farm_id=${encodeURIComponent(farmId)}`, { credentials: 'include' }),
-          fetch(`${API_BASE_URL}/api/accounting/reports/journal?farm_id=${encodeURIComponent(farmId)}`, { credentials: 'include' }),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/monthly`, { signal: controller.signal }),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/vat`, { signal: controller.signal }),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/journal`, { signal: controller.signal }),
         ])
 
         if (!monthlyRes.ok || !vatRes.ok || !journalRes.ok) {
-          throw new Error('Klarte ikke hente regnskapsdata')
+          const failedResponse = [monthlyRes, vatRes, journalRes].find((response) => !response.ok)
+          throw new Error(await apiErrorMessage(failedResponse!, 'Klarte ikke hente regnskapsdata'))
         }
 
         const monthlyData = await monthlyRes.json()
         const vatData = await vatRes.json()
         const journalData = await journalRes.json()
 
-        setMonthlyRows(monthlyData.rows || [])
-        setVat(vatData)
-        setJournalCount((journalData.rows || []).length)
+        if (!controller.signal.aborted) {
+          setMonthlyRows(monthlyData.rows || [])
+          setVat(vatData)
+          setJournalCount((journalData.rows || []).length)
+        }
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
         setError(err instanceof Error ? err.message : 'Ukjent feil')
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) setLoading(false)
       }
     }
 
     fetchData()
+    return () => controller.abort()
   }, [farmId])
 
   const totals = useMemo(() => {

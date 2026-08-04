@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { apiErrorMessage, apiFetch, bootstrapIdentity } from '@/lib/api'
 
 type Account = {
   code: string
@@ -33,7 +34,6 @@ type UploadedVoucher = {
   ocr_suggested_supplier?: string | null
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const FARM_ID_KEY = 'barebonde_active_farm_id'
 
 export default function NewVoucherPage() {
@@ -64,15 +64,22 @@ export default function NewVoucherPage() {
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    setFarmId(storedFarmId)
+    bootstrapIdentity(storedFarmId)
+      .then((identity) => {
+        const activeFarmId = identity?.active_farm?.id || ''
+        setFarmId(activeFarmId)
+        if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
+        else window.localStorage.removeItem(FARM_ID_KEY)
+      })
+      .catch(() => setFarmId(''))
   }, [])
 
   useEffect(() => {
     const run = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/accounting/accounts?query=${encodeURIComponent(search)}&simple_mode=${simpleMode}`)
+        const response = await apiFetch(`/api/accounting/accounts?query=${encodeURIComponent(search)}&simple_mode=${simpleMode}`)
         if (!response.ok) {
-          throw new Error('Klarte ikke hente kontoforslag')
+          throw new Error(await apiErrorMessage(response, 'Klarte ikke hente kontoforslag'))
         }
         const data = await response.json()
         setAccounts(data.accounts || [])
@@ -191,12 +198,11 @@ export default function NewVoucherPage() {
     try {
       const formData = new FormData()
       formData.append('file', selectedFile)
-      formData.append('farm_id', farmId)
       formData.append('description', description)
       formData.append('voucher_date', voucherDate)
       formData.append('simple_mode', String(simpleMode))
 
-      const response = await fetch(`${API_BASE}/api/accounting/vouchers/upload`, {
+      const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/vouchers`, {
         method: 'POST',
         body: formData,
       })
@@ -242,7 +248,7 @@ export default function NewVoucherPage() {
     setMessage('')
 
     try {
-      const response = await fetch(`${API_BASE}/api/accounting/vouchers/${uploadedVoucher.id}/book`, {
+      const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/vouchers/${encodeURIComponent(uploadedVoucher.id)}/book`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

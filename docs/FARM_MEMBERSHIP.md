@@ -8,9 +8,9 @@ Nye medlemskap har en deterministisk ID: `membership:{farm_id}:{user_id}`. De br
 
 Rollene er statiske i MVP-en:
 
-- `owner`: alle Farm- og abonnementstillatelser i katalogen.
-- `manager`: kan lese og oppdatere Farm, liste medlemmer og lese abonnement.
-- `staff`: kan lese Farm.
+- `owner`: alle tillatelser i katalogen.
+- `manager`: kan lese og oppdatere Farm, liste medlemmer, behandle og bokføre bilag, lese dokumenter/transaksjoner/rapporter og lese abonnement.
+- `staff`: kan lese Farm, lese og opprette bilagsutkast, samt lese, laste opp og laste ned dokumenter. Rollen kan ikke bokføre eller slette.
 
 Permission-katalogen ligger i `backend/app/core/permissions.py`. Rutehåndterere avgjør ikke roller selv.
 
@@ -24,6 +24,6 @@ Farm-avgrensede ruter bruker den serverstyrte sesjonen til å hente brukeren og 
 
 ## Avgrensninger
 
-Farm-opprettelse, Farm-lesing/-endring og medlemsliste er tenant-sikret i denne fasen. Regnskap, bilag, dokumenter, rapporter og Blob-nedlasting skal få tilsvarende Farm-autorisasjon i neste fase. Subscription, entitlements, usage, invitasjoner, rolleendring og eierskapsoverføring er ikke implementert.
+Farm-opprettelse, Farm-lesing/-endring, medlemsliste, bilag, dokumentmetadata, bokføring, transaksjonslisting, rapporter og Blob-nedlasting er tenant-sikret. Se [Tenant-sikring av regnskap og dokumenter](./TENANT_ACCOUNTING.md) for ruter, ressurskontroll og Blob-modell. Subscription, entitlements, usage, invitasjoner, rolleendring og eierskapsoverføring er ikke implementert.
 
 Medlemskap hentes med en begrenset cross-partition-spørring for `/api/me`. Dette er bevisst enkelt i MVP-en og må RU-måles før det optimaliseres med en ny projeksjon.

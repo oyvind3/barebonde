@@ -56,7 +56,10 @@ def service():
 def test_role_permissions_are_static_distinct_and_unknown_roles_have_none():
     assert Permission.FARM_ARCHIVE in permissions_for_role("owner")
     assert Permission.FARM_UPDATE in permissions_for_role("manager")
-    assert permissions_for_role("staff") == frozenset({Permission.FARM_READ})
+    assert Permission.VOUCHER_BOOK in permissions_for_role("manager")
+    assert Permission.VOUCHER_CREATE in permissions_for_role("staff")
+    assert Permission.DOCUMENT_DOWNLOAD in permissions_for_role("staff")
+    assert Permission.VOUCHER_BOOK not in permissions_for_role("staff")
     assert permissions_for_role("unknown") == frozenset()
     assert all(len(values) == len(set(values)) for values in ROLE_PERMISSIONS.values())
 

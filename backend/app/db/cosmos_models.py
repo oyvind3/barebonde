@@ -354,8 +354,8 @@ class AccountingDocument:
         file_name: str,
         content_type: str,
         blob_name: str,
-        blob_url: str,
         size_bytes: int,
+        blob_url: Optional[str] = None,
         status: str = "mottatt",
         account_code: Optional[str] = None,
         mva_code: Optional[str] = None,
@@ -384,14 +384,13 @@ class AccountingDocument:
         self.updated_at = updated_at or datetime.utcnow()
 
     def to_dict(self) -> dict:
-        return {
+        document = {
             "id": self.id,
             "type": self.type,
             "farm_id": self.farm_id,
             "file_name": self.file_name,
             "content_type": self.content_type,
             "blob_name": self.blob_name,
-            "blob_url": self.blob_url,
             "size_bytes": self.size_bytes,
             "status": self.status,
             "account_code": self.account_code,
@@ -402,6 +401,11 @@ class AccountingDocument:
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
         }
+        # Old documents can retain this metadata, but new writes must not
+        # normalize a direct Blob URL into the document schema.
+        if self.blob_url:
+            document["blob_url"] = self.blob_url
+        return document
 
 
 class AccountingTransaction:

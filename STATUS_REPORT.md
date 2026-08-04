@@ -16,14 +16,13 @@
 
 BRREG-oppslag, gårdsoppsett, bilag/OCR og Plunk-integrasjon finnes i repositoryet. Identity-MVP-en bruker e-postbasert engangsinnlogging, Cosmos-baserte ugjennomsiktige sesjoner, `HttpOnly`-cookie, CSRF, logout og sesjonsoversikt. Onboarding lagrer profilopplysninger, sender en e-postbekreftelse og lar brukeren først velge betaling etter at lenken har opprettet en sesjon. BRREG-adresse med postnummer og poststed fylles inn på gårdsprofilen. `FarmUser` er nå den autoritative medlemskapsmodellen: `GET /api/me` returnerer aktive medlemskap og en validert aktiv Farm, og Farm-rutene kontrollerer medlemskap og rolle server-side. `IDENTITY_HMAC_KEY` må konfigureres separat før rutene kan brukes i et miljø.
 
-Rollene `owner`, `manager` og `staff` bruker en sentral, statisk permission-katalog. Opprettelse, lesing, endring og medlemsliste for Farm er tenant-isolert. Abonnement, entitlements og usage er fortsatt ikke implementert. Regnskaps-, bilags-, dokument- og Blob-rutene er ikke ennå dekket av Farm-autorisasjonen og må ikke oppfattes som tenant-sikre.
+Rollene `owner`, `manager` og `staff` bruker en sentral, statisk permission-katalog. Opprettelse, lesing, endring og medlemsliste for Farm er tenant-isolert. Bilag, dokumentmetadata, dokumentnedlasting, bokføring, transaksjonslisting og rapporter bruker nå Farm-scope i URL, aktivt medlemskap og permission. Muterende bilagsruter krever CSRF. Nye Blob-navn er bundet til Farm og servergenerert dokument-ID; API-et streamer autoriserte nedlastinger og returnerer ikke varige Blob-URL-er. Abonnement, entitlements og usage er fortsatt ikke implementert.
 
 Cosmos DB er den faktiske datalagringen. SQLAlchemy, PostgreSQL, Better Auth, ID-porten og Ory/Kratos er ikke aktive deler av dagens arkitektur.
 
 ## Neste arbeid
 
-1. Tenant-sikring av bilag, dokumenter, bokføring, rapporter og Blob-tilgang.
-2. Abonnement og statiske entitlements per gård.
-3. Rate limiting og sikkerhetsgjennomgang av Identity før bred produksjonsbruk.
+1. Free Subscription, statiske plan-definisjoner og Entitlement-gating på én faktisk funksjon.
+2. Rate limiting og sikkerhetsgjennomgang av Identity før bred produksjonsbruk.
 
 Bootstrap-skriptet finnes, men er ikke kjørt mot et reelt Cosmos-miljø som del av repository-arbeidet.

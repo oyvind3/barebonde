@@ -12,6 +12,21 @@ class Permission(str, Enum):
     MEMBER_LIST = "member.list"
     SUBSCRIPTION_READ = "subscription.read"
     SUBSCRIPTION_MANAGE = "subscription.manage"
+    VOUCHER_READ = "voucher.read"
+    VOUCHER_CREATE = "voucher.create"
+    VOUCHER_UPDATE = "voucher.update"
+    VOUCHER_DELETE = "voucher.delete"
+    VOUCHER_BOOK = "voucher.book"
+    DOCUMENT_READ = "document.read"
+    DOCUMENT_UPLOAD = "document.upload"
+    DOCUMENT_DELETE = "document.delete"
+    DOCUMENT_DOWNLOAD = "document.download"
+    TRANSACTION_READ = "transaction.read"
+    TRANSACTION_CREATE = "transaction.create"
+    TRANSACTION_UPDATE = "transaction.update"
+    TRANSACTION_DELETE = "transaction.delete"
+    REPORT_BASIC_READ = "report.basic.read"
+    REPORT_ADVANCED_READ = "report.advanced.read"
 
 
 ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
@@ -22,9 +37,31 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.FARM_UPDATE,
             Permission.MEMBER_LIST,
             Permission.SUBSCRIPTION_READ,
+            Permission.VOUCHER_READ,
+            Permission.VOUCHER_CREATE,
+            Permission.VOUCHER_UPDATE,
+            Permission.VOUCHER_BOOK,
+            Permission.DOCUMENT_READ,
+            Permission.DOCUMENT_UPLOAD,
+            Permission.DOCUMENT_DOWNLOAD,
+            Permission.TRANSACTION_READ,
+            Permission.TRANSACTION_CREATE,
+            Permission.TRANSACTION_UPDATE,
+            Permission.REPORT_BASIC_READ,
+            Permission.REPORT_ADVANCED_READ,
         }
     ),
-    "staff": frozenset({Permission.FARM_READ}),
+    "staff": frozenset(
+        {
+            Permission.FARM_READ,
+            Permission.VOUCHER_READ,
+            Permission.VOUCHER_CREATE,
+            Permission.DOCUMENT_READ,
+            Permission.DOCUMENT_UPLOAD,
+            Permission.DOCUMENT_DOWNLOAD,
+            Permission.REPORT_BASIC_READ,
+        }
+    ),
 }
 
 

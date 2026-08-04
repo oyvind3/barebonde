@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
+import { apiErrorMessage, apiFetch, bootstrapIdentity } from '@/lib/api'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const FARM_ID_KEY = 'barebonde_active_farm_id'
 
 type MonthlyRow = { month: string; income: number; expense: number; net: number }
@@ -29,7 +29,17 @@ export default function ReportsPage() {
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    setFarmId(storedFarmId)
+    bootstrapIdentity(storedFarmId)
+      .then((identity) => {
+        const activeFarmId = identity?.active_farm?.id || ''
+        setFarmId(activeFarmId)
+        if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
+        else window.localStorage.removeItem(FARM_ID_KEY)
+      })
+      .catch(() => {
+        setError('Kunne ikke hente den aktive gården.')
+        setFarmId('')
+      })
   }, [])
 
   useEffect(() => {
@@ -43,15 +53,16 @@ export default function ReportsPage() {
       setError('')
       try {
         const [monthlyRes, vatRes, grantsRes, journalRes, liquidityRes] = await Promise.all([
-          fetch(`${API_BASE}/api/accounting/reports/monthly?farm_id=${encodeURIComponent(farmId)}`),
-          fetch(`${API_BASE}/api/accounting/reports/vat?farm_id=${encodeURIComponent(farmId)}`),
-          fetch(`${API_BASE}/api/accounting/reports/grants?farm_id=${encodeURIComponent(farmId)}`),
-          fetch(`${API_BASE}/api/accounting/reports/journal?farm_id=${encodeURIComponent(farmId)}`),
-          fetch(`${API_BASE}/api/accounting/reports/liquidity?farm_id=${encodeURIComponent(farmId)}&opening_balance=0`),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/monthly`),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/vat`),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/grants`),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/journal`),
+          apiFetch(`/api/farms/${encodeURIComponent(farmId)}/reports/liquidity?opening_balance=0`),
         ])
 
         if (!monthlyRes.ok || !vatRes.ok || !grantsRes.ok || !journalRes.ok || !liquidityRes.ok) {
-          throw new Error('Klarte ikke hente rapportdata')
+          const failedResponse = [monthlyRes, vatRes, grantsRes, journalRes, liquidityRes].find((response) => !response.ok)
+          throw new Error(await apiErrorMessage(failedResponse!, 'Klarte ikke hente rapportdata'))
         }
 
         const monthlyData = await monthlyRes.json()

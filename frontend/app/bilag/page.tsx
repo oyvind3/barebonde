@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { apiErrorMessage, apiFetch, bootstrapIdentity } from '@/lib/api'
 
 type Voucher = {
   id: string
@@ -17,10 +17,8 @@ type Voucher = {
   mva_code: string | null
   voucher_date: string
   description: string | null
-  blob_url: string
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const FARM_ID_KEY = 'barebonde_active_farm_id'
 
 export default function BilagPage() {
@@ -36,7 +34,17 @@ export default function BilagPage() {
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    setFarmId(storedFarmId)
+    bootstrapIdentity(storedFarmId)
+      .then((identity) => {
+        const activeFarmId = identity?.active_farm?.id || ''
+        setFarmId(activeFarmId)
+        if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
+        else window.localStorage.removeItem(FARM_ID_KEY)
+      })
+      .catch(() => {
+        setError('Kunne ikke hente den aktive gården.')
+        setFarmId('')
+      })
   }, [])
 
   useEffect(() => {
@@ -62,17 +70,17 @@ export default function BilagPage() {
       setLoading(true)
       setError('')
       try {
-        const params = new URLSearchParams({ farm_id: farmId })
+        const params = new URLSearchParams()
         if (debouncedQuery) params.set('q', debouncedQuery)
         if (statusFilter) params.set('status', statusFilter)
         if (dateFrom) params.set('date_from', dateFrom)
         if (dateTo) params.set('date_to', dateTo)
 
-        const response = await fetch(`${API_BASE}/api/accounting/vouchers?${params.toString()}`, {
+        const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/vouchers?${params.toString()}`, {
           signal: controller.signal,
         })
         if (!response.ok) {
-          throw new Error('Klarte ikke hente bilag')
+          throw new Error(await apiErrorMessage(response, 'Klarte ikke hente bilag'))
         }
         const data = (await response.json()) as Voucher[]
         setItems(data)
@@ -96,6 +104,22 @@ export default function BilagPage() {
     setStatusFilter('')
     setDateFrom('')
     setDateTo('')
+  }
+
+  const downloadVoucher = async (item: Voucher) => {
+    setError('')
+    try {
+      const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/documents/${encodeURIComponent(item.id)}/download`)
+      if (!response.ok) throw new Error(await apiErrorMessage(response, 'Klarte ikke laste ned dokumentet'))
+      const objectUrl = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = item.file_name
+      link.click()
+      URL.revokeObjectURL(objectUrl)
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : 'Klarte ikke laste ned dokumentet')
+    }
   }
 
   const summary = useMemo(() => {
@@ -269,9 +293,9 @@ export default function BilagPage() {
                           </span>
                         </td>
                         <td className="p-3">
-                          <Link href={item.blob_url} target="_blank" className="text-bonde-green hover:underline">
+                          <button type="button" onClick={() => downloadVoucher(item)} className="text-bonde-green hover:underline">
                             Åpne
-                          </Link>
+                          </button>
                         </td>
                       </tr>
                     ))}

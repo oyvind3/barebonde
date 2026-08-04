@@ -108,8 +108,10 @@ class OCRService:
         ):
             try:
                 return self._extract_with_azure(payload)
-            except Exception as exc:
-                warnings.append(f"Azure OCR feilet, fallback brukt: {exc}")
+            except Exception:
+                # Provider details can contain request identifiers or service data;
+                # keep the stored warning safe for later display.
+                warnings.append("OCR-tjenesten var utilgjengelig; lokal fallback ble brukt")
 
         if content_type == "application/pdf" or extension == "pdf":
             fallback = self._extract_pdf_text(payload)

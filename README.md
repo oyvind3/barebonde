@@ -16,7 +16,7 @@ Cloudflare- og Azure-konfigurasjon håndteres manuelt i MVP-en. Det er ikke plan
 
 Identity-MVP-en bruker e-postbaserte engangslenker, serverstyrte ugjennomsiktige Cosmos-sesjoner, `HttpOnly`-cookie og CSRF-token. Onboarding bekrefter e-postadressen før betalingsvalg og gårdsopprettelse. `Farm` er tenant-modellen, og en aktiv `FarmUser`-tilknytning er den autoritative kilden til tilgang. `GET /api/me` returnerer bruker, sesjon, CSRF-token, aktive medlemskap og en validert aktiv gård. Rå sesjonstoken og e-postadresser lagres ikke i Identity-oppslagsdokumenter.
 
-`IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-rutene er medlemskapsbeskyttet, mens regnskap, bilag, dokumenter og Blob-tilgang fortsatt skal tenant-sikres i neste fase. Abonnement og entitlements er ikke implementert. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
+`IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-, bilags-, dokument-, transaksjons- og rapport-ruter er medlemskaps- og permission-beskyttet. Beskyttede Blob-filer lastes ned via autorisert API-streaming, ikke varige Blob-URL-er. Abonnement og entitlements er ikke implementert. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
 
 Et eventuelt tidligere Ory-prosjekt må slettes eller deaktiveres manuelt i Ory-konsollen; repositoryet kan ikke gjøre dette.
 
@@ -85,10 +85,11 @@ docs/architecture/       Arkitekturbeslutninger
 - [Cosmos-bootstrap](./docs/COSMOS_BOOTSTRAP.md)
 - [Identity-MVP](./docs/IDENTITY.md)
 - [Farm-medlemskap og tenant-isolasjon](./docs/FARM_MEMBERSHIP.md)
+- [Tenant-sikring av regnskap og dokumenter](./docs/TENANT_ACCOUNTING.md)
 - [Produktbacklog](./backlog/epics.md)
 - [Statusrapport](./STATUS_REPORT.md)
 - [Sjekkliste](./CHECKLIST.md)
 
 ## Neste planlagte fase
 
-`Tenant-sikring av bilag, dokumenter, bokføring, rapporter og Blob-tilgang`.
+`Free Subscription, statiske plan-definisjoner og Entitlement-gating på én faktisk funksjon`.

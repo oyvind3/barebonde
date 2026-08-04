@@ -61,6 +61,16 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   return fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include' })
 }
 
+export async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
+  const payload = await response.json().catch(() => ({})) as { detail?: unknown }
+  if (typeof payload.detail === 'string' && payload.detail) return payload.detail
+  if (response.status === 401) return 'Logg inn for å fortsette.'
+  if (response.status === 403) return 'Du har ikke rollen som kreves for denne handlingen.'
+  if (response.status === 404) return 'Ressursen ble ikke funnet.'
+  if (response.status === 409) return 'Handlingen er allerede utført eller er i konflikt med gjeldende status.'
+  return fallback
+}
+
 export async function bootstrapIdentity(preferredFarmId?: string): Promise<IdentityBootstrap | null> {
   const selectedFarmId = preferredFarmId || (
     typeof window !== 'undefined' ? window.localStorage.getItem('barebonde_active_farm_id') || '' : ''
