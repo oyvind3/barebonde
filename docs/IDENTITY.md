@@ -4,7 +4,7 @@ Barebonde bruker fortsatt én FastAPI-basert Azure Function App. Identity er en 
 
 ## Flyter
 
-- `POST /api/auth/google` validerer Google ID-token på serveren, løser Google-subjekt/e-post til en intern `user_id`, oppretter en Cosmos-sesjon og setter en `HttpOnly`-cookie.
+- `POST /api/auth/register` lagrer onboardingprofilen og sender en én-gangs bekreftelseslenke til `/farm/setup`.
 - `POST /api/auth/magic-link` oppretter en e-postbasert utfordring som kan brukes én gang. Plunk leverer lenken.
 - `POST /api/auth/magic-link/verify` bruker utfordringen én gang og oppretter sesjonen.
 - `GET /api/me` returnerer bruker, gjeldende sesjon, CSRF-token og aktive Farm-medlemskap. Den aktive gården er alltid validert mot de aktive medlemskapene.
@@ -13,7 +13,7 @@ Barebonde bruker fortsatt én FastAPI-basert Azure Function App. Identity er en 
 ## Cosmos-data
 
 - `users` beholder `/better_auth_id` som partisjonsnøkkel. Nye dokumenter får additive felter som `user_id`, `status`, `email_normalized`, `identity_version` og tidsstempler.
-- `identity_lookups` er partisjonert på `/lookup_partition_id`. ID-en er en HMAC med `IDENTITY_HMAC_KEY`; dokumentet lagrer ikke rå e-post eller rå Google-subjekt.
+- `identity_lookups` er partisjonert på `/lookup_partition_id`. ID-en er en HMAC med `IDENTITY_HMAC_KEY`; dokumentet lagrer ikke rå e-post.
 - `auth_challenges` har én e-postutfordring per dokument og lagrer bare intern brukerreferanse, utløp og forbrukstid.
 - `auth_sessions` har bare en HMAC-basert sesjons-ID, intern brukerreferanse, utløp og tilbakekalling. Det tilfeldige cookie-tokenet lagres aldri i Cosmos.
 
@@ -21,8 +21,8 @@ Kjør det manuelle [Cosmos-bootstrap-skriptet](./COSMOS_BOOTSTRAP.md) mot et val
 
 ## Drift og grenser
 
-Sett en separat, tilfeldig `IDENTITY_HMAC_KEY` i Function App-konfigurasjonen. Ikke gjenbruk en tidligere JWT-, Google- eller Plunk-hemmelighet. Uten nøkkelen feiler Identity-rutene lukket, mens health-endepunktet fortsatt fungerer.
+Sett en separat, tilfeldig `IDENTITY_HMAC_KEY` i Function App-konfigurasjonen. Ikke gjenbruk en tidligere JWT- eller Plunk-hemmelighet. Uten nøkkelen feiler Identity-rutene lukket, mens health-endepunktet fortsatt fungerer.
 
-Produksjonsfrontend og API ligger på forskjellige origins i dagens oppsett. CORS tillater `barebonde.no`, og produksjonscookie bruker `SameSite=None; Secure`. Cloudflare/API-domeneoppsett må verifiseres i en ekte nettleser, siden strenge tredjeparts-cookie-regler kan kreve en same-site API-domenevariant. Dette dokumentet endrer ikke Cloudflare eller Azure.
+Produksjonsfrontend og API ligger på forskjellige origins i dagens oppsett. FastAPI tillater `https://barebonde.no` med credentials, og produksjonscookie bruker `SameSite=None; Secure`. Function App-ens plattform-CORS må ha samme origin og credentials aktivert; plattformen kan ellers stanse preflight før FastAPI mottar requesten. Cloudflare/API-domeneoppsett må verifiseres i en ekte nettleser, siden strenge tredjeparts-cookie-regler kan kreve en same-site API-domenevariant. Dette dokumentet endrer ikke Cloudflare eller Azure.
 
 Identity bestemmer bare hvem brukeren er. `FarmUser` bestemmer hvilken Farm brukeren har tilgang til og hvilke Farm-handlinger rollen tillater; se [Farm-medlemskap](./FARM_MEMBERSHIP.md). Denne fasen innfører ikke abonnement, entitlements, invites eller betalingsintegrasjon. Regnskaps-, bilags-, dokument- og Blob-ruter er fortsatt ikke påstått å være tenant-autorisert.

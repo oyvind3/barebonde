@@ -1,4 +1,4 @@
-"""User authentication, onboarding, Plunk email, and Google OAuth routes."""
+"""Passwordless e-mail authentication, onboarding, and Plunk email routes."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from google.auth.transport import requests
-from google.oauth2 import id_token
 from pydantic import BaseModel, EmailStr, field_validator
 
 from app.api.dependencies.identity import CurrentIdentity, get_current_identity, require_csrf
@@ -28,7 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DEFAULT_PLUNK_API_URL = "https://next-api.useplunk.com/v1/send"
-DEFAULT_FRONTEND_URL = "https://salmon-ocean-076260203.7.azurestaticapps.net"
+DEFAULT_FRONTEND_URL = "https://barebonde.no"
 E164_PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
@@ -57,7 +55,6 @@ class RegisterRequest(BaseModel):
     first_name: str
     last_name: str
     email: EmailStr
-    google_token: Optional[str] = None
     phone_number: str
     address: Optional[str] = None
     onboarding_role: Optional[str] = None
@@ -87,25 +84,6 @@ class MagicLinkRequest(BaseModel):
 
 class MagicLinkVerifyRequest(BaseModel):
     token: str
-
-
-class GoogleTokenRequest(BaseModel):
-    token: str
-
-
-class GoogleConfigResponse(BaseModel):
-    client_id: str
-
-
-class GoogleIdentityResponse(BaseModel):
-    """Verified Google claims used to defer Cosmos persistence until onboarding ends."""
-
-    google_id: str
-    email: str
-    first_name: str
-    last_name: str = ""
-    picture: Optional[str] = None
-    hosted_domain: Optional[str] = None
 
 
 def _get_plunk_config() -> tuple[str, str, str, Optional[str], str]:
@@ -211,38 +189,20 @@ def _clear_session_cookie(response: Response) -> None:
 
 
 async def _send_confirmation_email(email: str, first_name: str, *, is_resend: bool = False) -> None:
-    """Send the actual e-mail login link used by the passwordless MVP."""
+    """Send the onboarding e-mail link used to verify the address."""
     # Fail before creating a reusable challenge if delivery is not configured.
     _get_plunk_config()
     safe_name = html.escape(first_name or "Bonde")
     raw_token = ChallengeService().create_email_login_challenge(email=email, first_name=first_name)
-    action = "Du ba om å få en ny innloggingslenke." if is_resend else "Takk for at du opprettet konto hos Barebonde."
+    action = "Du ba om en ny bekreftelseslenke." if is_resend else "Takk for at du oppretter konto hos Barebonde."
     await _send_plunk_email(
         to=email,
-        subject="Din innloggingslenke til Barebonde",
+        subject="Bekreft e-postadressen din hos Barebonde",
         body=(
             f"<h1>Hei {safe_name}!</h1><p>{action}</p>"
-            f"<p><a href='{_frontend_url()}/login?token={raw_token}'>Logg inn i Barebonde</a></p>"
+            f"<p><a href='{_frontend_url()}/farm/setup?token={raw_token}'>Bekreft e-postadressen</a></p>"
             f"<p>Lenken kan brukes én gang og utløper om {settings.identity_magic_link_ttl_seconds // 60} minutter.</p>"
         ),
-    )
-
-
-def _google_identity_from_payload(payload: dict[str, Any]) -> GoogleIdentityResponse:
-    google_id = str(payload.get("sub") or "")
-    email = str(payload.get("email") or "").lower()
-    if not google_id or not email:
-        raise ValueError("Google-tokenet mangler brukeridentitet.")
-    if payload.get("email_verified") is not True:
-        raise ValueError("Google har ikke bekreftet e-postadressen.")
-
-    return GoogleIdentityResponse(
-        google_id=google_id,
-        email=email,
-        first_name=str(payload.get("given_name") or payload.get("name") or "Bonde"),
-        last_name=str(payload.get("family_name") or ""),
-        picture=str(payload["picture"]) if payload.get("picture") else None,
-        hosted_domain=str(payload["hd"]) if payload.get("hd") else None,
     )
 
 
@@ -256,8 +216,6 @@ def _upsert_existing_user(
     phone_number: Optional[str] = None,
     address: Optional[str] = None,
     onboarding_role: Optional[str] = None,
-    google_id: Optional[str] = None,
-    picture: Optional[str] = None,
     phone_verified: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Update profile fields while preserving the immutable Cosmos partition key."""
@@ -274,10 +232,6 @@ def _upsert_existing_user(
         user_data["address"] = address
     if onboarding_role is not None:
         user_data["onboarding_role"] = onboarding_role
-    if google_id is not None:
-        user_data["google_id"] = google_id
-    if picture is not None:
-        user_data["picture"] = picture
     if phone_verified is not None:
         user_data["phone_verified"] = phone_verified
     user_data["email_normalized"] = email.strip().casefold()
@@ -303,38 +257,18 @@ async def resend_confirmation_email(req: MagicLinkRequest) -> dict[str, str]:
 async def register_user(req: RegisterRequest) -> AuthResponse:
     """Persist a profile during the existing multi-step farm onboarding.
 
-    This route is profile collection, not password authentication. Sign-in is
-    exclusively handled by Google or the one-time e-mail link endpoints below.
+    This route collects the profile, then sends the one-time e-mail link that
+    verifies the address and starts the server-managed session.
     """
     email = str(req.email).lower()
     first_name = req.first_name.strip()
     last_name = req.last_name.strip()
     address = (req.address or "").strip() or None
     onboarding_role = (req.onboarding_role or "").strip() or None
-    google_identity: Optional[GoogleIdentityResponse] = None
-
-    if req.google_token:
-        try:
-            google_identity = _google_identity_from_payload(await verify_google_token(req.google_token))
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-        email = google_identity.email
-        first_name = google_identity.first_name
-        last_name = google_identity.last_name
 
     try:
         identity_service = IdentityService()
-        if google_identity:
-            user_data = identity_service.resolve_google_identity(
-                google_id=google_identity.google_id,
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                picture=google_identity.picture,
-                hosted_domain=google_identity.hosted_domain,
-            )
-        else:
-            user_data = identity_service.resolve_email_identity(email=email, first_name=first_name)
+        user_data = identity_service.resolve_email_identity(email=email, first_name=first_name)
         user_data = _upsert_existing_user(
             identity_service.users,
             user_data,
@@ -344,8 +278,6 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
             phone_number=req.phone_number,
             address=address,
             onboarding_role=onboarding_role,
-            google_id=google_identity.google_id if google_identity else None,
-            picture=google_identity.picture if google_identity else None,
         )
     except (IdentityConflictError, DisabledUserError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -355,18 +287,6 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Kunne ikke opprette brukeren akkurat nå. Prøv igjen.",
         ) from exc
-
-    if google_identity:
-        return AuthResponse(
-            user_id=str(user_data["id"]),
-            email=email,
-            first_name=first_name,
-            last_name=last_name,
-            phone_number=req.phone_number,
-            email_sent=False,
-            email_message="E-postadressen er bekreftet av Google.",
-            message="Google-kontoen og den personlige profilen er lagret.",
-        )
 
     try:
         await _send_confirmation_email(email, first_name or "Bonde")
@@ -441,89 +361,6 @@ async def verify_magic_link(req: MagicLinkVerifyRequest, response: Response) -> 
         csrf_token=SessionService().csrf_token(raw_session_token),
         message="Innlogging med e-postlenke var vellykket.",
     )
-
-
-def _get_google_client_id() -> str:
-    return (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
-
-
-@router.get("/google/config", response_model=GoogleConfigResponse)
-async def google_config() -> GoogleConfigResponse:
-    """Expose the public Google client ID at runtime for the static frontend."""
-    client_id = _get_google_client_id()
-    if not client_id:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google innlogging er ikke konfigurert på serveren.",
-        )
-    return GoogleConfigResponse(client_id=client_id)
-
-
-async def verify_google_token(token: str) -> dict[str, Any]:
-    """Verify a Google Identity Services credential against the configured audience."""
-    google_client_id = _get_google_client_id()
-    if not google_client_id:
-        raise ValueError("Google OAuth er ikke konfigurert på serveren.")
-
-    try:
-        return id_token.verify_oauth2_token(token, requests.Request(), audience=google_client_id)
-    except Exception as exc:
-        logger.warning("Google token verification failed: %s", exc)
-        raise ValueError("Google-tokenet er ugyldig eller utløpt.") from exc
-
-
-@router.post("/google", response_model=AuthenticatedResponse)
-async def google_auth(req: GoogleTokenRequest, response: Response) -> AuthenticatedResponse:
-    """Verify Google, resolve a stable user, then create an opaque session."""
-    if not req.token or not req.token.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token er påkrevd.")
-
-    try:
-        payload = await verify_google_token(req.token)
-        identity = _google_identity_from_payload(payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-
-    try:
-        user_data = IdentityService().resolve_google_identity(
-            google_id=identity.google_id,
-            email=identity.email,
-            first_name=identity.first_name,
-            last_name=identity.last_name,
-            picture=identity.picture,
-            hosted_domain=identity.hosted_domain,
-        )
-        raw_session_token, session = SessionService().create_session(user_data)
-    except IdentityConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except DisabledUserError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except (IdentitySecurityConfigurationError, IdentityError) as exc:
-        logger.error("Could not persist Google user: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google-innlogging lyktes, men brukeren kunne ikke lagres. Prøv igjen.",
-        ) from exc
-
-    _set_session_cookie(response, raw_session_token)
-    return AuthenticatedResponse(
-        **user_response(user_data).model_dump(),
-        session=session_response(session),
-        csrf_token=SessionService().csrf_token(raw_session_token),
-        message="Innlogget med Google.",
-    )
-
-
-@router.post("/google/verify", response_model=GoogleIdentityResponse)
-async def verify_google_identity(req: GoogleTokenRequest) -> GoogleIdentityResponse:
-    """Verify Google claims without creating a Cosmos profile before onboarding completes."""
-    if not req.token or not req.token.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token er påkrevd.")
-
-    try:
-        return _google_identity_from_payload(await verify_google_token(req.token))
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

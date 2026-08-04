@@ -57,7 +57,3 @@ def csrf_token_for_session(raw_session_token: str) -> str:
 
 def email_lookup_identifier(normalized_email: str) -> str:
     return hmac_identifier("email", normalized_email)
-
-
-def google_lookup_identifier(google_subject: str) -> str:
-    return hmac_identifier("google-subject", google_subject)

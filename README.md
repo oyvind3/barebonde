@@ -7,14 +7,14 @@ Barebonde er en modulær plattform for norske gårdsbruk og landbruksforetak. L�
 - `frontend/`: Next.js 14 med TypeScript og statisk eksport til Azure Static Web Apps.
 - `backend/`: FastAPI pakket som én Azure Functions `AsgiFunctionApp` i `function_app.py`.
 - Data: Azure Cosmos DB (NoSQL) for domeneobjekter og Azure Blob Storage for dokumenter.
-- Integrasjoner: BRREG-oppslag, Plunk for transaksjonell e-post og Google Identity Services i dagens onboarding.
+- Integrasjoner: BRREG-oppslag og Plunk for transaksjonell e-post.
 - Leveranse: eksisterende GitHub Actions-workflows bygger og publiserer frontend og Function App.
 
 Cloudflare- og Azure-konfigurasjon håndteres manuelt i MVP-en. Det er ikke planlagt IaC i denne fasen.
 
 ## Sikkerhetsstatus
 
-Identity-MVP-en bruker verifiserte Google ID-token eller en e-postbasert engangslenke, serverstyrte ugjennomsiktige Cosmos-sesjoner, `HttpOnly`-cookie og CSRF-token. `Farm` er tenant-modellen, og en aktiv `FarmUser`-tilknytning er den autoritative kilden til tilgang. `GET /api/me` returnerer bruker, sesjon, CSRF-token, aktive medlemskap og en validert aktiv gård. Rå sesjonstoken, e-postadresser og Google-subjekter lagres ikke i Identity-oppslagsdokumenter.
+Identity-MVP-en bruker e-postbaserte engangslenker, serverstyrte ugjennomsiktige Cosmos-sesjoner, `HttpOnly`-cookie og CSRF-token. Onboarding bekrefter e-postadressen før betalingsvalg og gårdsopprettelse. `Farm` er tenant-modellen, og en aktiv `FarmUser`-tilknytning er den autoritative kilden til tilgang. `GET /api/me` returnerer bruker, sesjon, CSRF-token, aktive medlemskap og en validert aktiv gård. Rå sesjonstoken og e-postadresser lagres ikke i Identity-oppslagsdokumenter.
 
 `IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-rutene er medlemskapsbeskyttet, mens regnskap, bilag, dokumenter og Blob-tilgang fortsatt skal tenant-sikres i neste fase. Abonnement og entitlements er ikke implementert. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
 
@@ -86,7 +86,6 @@ docs/architecture/       Arkitekturbeslutninger
 - [Identity-MVP](./docs/IDENTITY.md)
 - [Farm-medlemskap og tenant-isolasjon](./docs/FARM_MEMBERSHIP.md)
 - [Produktbacklog](./backlog/epics.md)
-- [Google-oppsett](./docs/GOOGLE_OAUTH_SETUP.md)
 - [Statusrapport](./STATUS_REPORT.md)
 - [Sjekkliste](./CHECKLIST.md)
 

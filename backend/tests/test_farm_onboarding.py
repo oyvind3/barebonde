@@ -109,6 +109,8 @@ async def brreg_farm(_org_number):
     return {
         "name": "Solberg gård",
         "address": "Gårdsveien 14",
+        "postal_code": "2350",
+        "city": "Nes på Hedmarken",
         "municipality": "Nes",
         "organization_form": "ENK",
         "industry_code": "Dyrking av korn",
@@ -161,6 +163,8 @@ def test_create_farm_derives_owner_from_session_ignores_onboarding_header_and_re
 
     assert first.status_code == second.status_code == 200
     assert first.json()["id"] == second.json()["id"] == "farm:123456789"
+    assert first.json()["postal_code"] == "2350"
+    assert first.json()["city"] == "Nes på Hedmarken"
     owner = state.memberships[membership_id("farm:123456789", "user-123")]
     assert owner["farm_role"] == "owner"
     assert all(item["user_id"] != "attacker" for item in state.memberships.values())

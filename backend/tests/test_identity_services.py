@@ -48,8 +48,6 @@ class MemoryContainer:
         value = parameters[0]["value"]
         if "email_normalized" in query:
             return [item for item in self.items.values() if item.get("email_normalized") == value]
-        if "google_id" in query:
-            return [item for item in self.items.values() if item.get("google_id") == value]
         if " c.email =" in query:
             return [item for item in self.items.values() if item.get("email") == value]
         if "user_id" in query:
@@ -72,20 +70,6 @@ def test_email_identity_uses_an_opaque_lookup_without_storing_email_in_the_looku
     assert lookup["lookup_type"] == "email"
     assert "ola@example.com" not in str(lookup).lower()
     assert len(lookup["id"]) == 64
-
-
-def test_google_subject_is_stable_and_second_login_resolves_the_same_user():
-    identity = identity_service()
-
-    first = identity.resolve_google_identity(
-        google_id="google-subject", email="ola@gmail.com", first_name="Ola"
-    )
-    second = identity.resolve_google_identity(
-        google_id="google-subject", email="new-address@example.com", first_name="Ola"
-    )
-
-    assert first["user_id"] == second["user_id"]
-    assert all("google-subject" not in str(lookup) for lookup in identity.lookups.items.values())
 
 
 def test_email_challenge_is_opaque_expires_and_can_only_be_consumed_once():

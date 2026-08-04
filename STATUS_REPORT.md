@@ -14,7 +14,7 @@
 
 ## Produktstatus
 
-BRREG-oppslag, gårdsoppsett, bilag/OCR og Plunk-integrasjon finnes i repositoryet. Identity-MVP-en har Google Identity Services, e-postbasert engangsinnlogging, Cosmos-baserte ugjennomsiktige sesjoner, `HttpOnly`-cookie, CSRF, logout og sesjonsoversikt. `FarmUser` er nå den autoritative medlemskapsmodellen: `GET /api/me` returnerer aktive medlemskap og en validert aktiv Farm, og Farm-rutene kontrollerer medlemskap og rolle server-side. `IDENTITY_HMAC_KEY` må konfigureres separat før rutene kan brukes i et miljø.
+BRREG-oppslag, gårdsoppsett, bilag/OCR og Plunk-integrasjon finnes i repositoryet. Identity-MVP-en bruker e-postbasert engangsinnlogging, Cosmos-baserte ugjennomsiktige sesjoner, `HttpOnly`-cookie, CSRF, logout og sesjonsoversikt. Onboarding lagrer profilopplysninger, sender en e-postbekreftelse og lar brukeren først velge betaling etter at lenken har opprettet en sesjon. BRREG-adresse med postnummer og poststed fylles inn på gårdsprofilen. `FarmUser` er nå den autoritative medlemskapsmodellen: `GET /api/me` returnerer aktive medlemskap og en validert aktiv Farm, og Farm-rutene kontrollerer medlemskap og rolle server-side. `IDENTITY_HMAC_KEY` må konfigureres separat før rutene kan brukes i et miljø.
 
 Rollene `owner`, `manager` og `staff` bruker en sentral, statisk permission-katalog. Opprettelse, lesing, endring og medlemsliste for Farm er tenant-isolert. Abonnement, entitlements og usage er fortsatt ikke implementert. Regnskaps-, bilags-, dokument- og Blob-rutene er ikke ennå dekket av Farm-autorisasjonen og må ikke oppfattes som tenant-sikre.
 

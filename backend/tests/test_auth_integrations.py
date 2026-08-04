@@ -98,61 +98,23 @@ def test_plunk_sender_uses_secret_key_verified_sender_and_current_endpoint(monke
     assert calls[0][1]["json"]["from"] == {"email": "post@example.com", "name": "Barebonde"}
 
 
-def test_google_config_is_available_at_runtime(monkeypatch):
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id.apps.googleusercontent.com")
+def test_onboarding_confirmation_link_returns_to_farm_setup(monkeypatch):
+    sent = []
 
-    response = make_client().get("/google/config")
+    class FakeChallengeService:
+        def create_email_login_challenge(self, **_):
+            return "one-time-token"
 
-    assert response.status_code == 200
-    assert response.json() == {"client_id": "client-id.apps.googleusercontent.com"}
+    async def fake_send(**kwargs):
+        sent.append(kwargs)
 
+    monkeypatch.setattr(auth, "ChallengeService", FakeChallengeService)
+    monkeypatch.setattr(auth, "_get_plunk_config", lambda: ("sk_test", "post@example.com", "Barebonde", None, "url"))
+    monkeypatch.setattr(auth, "_send_plunk_email", fake_send)
 
-def test_google_auth_creates_an_opaque_cookie_and_never_returns_the_session_secret(monkeypatch):
-    class FakeIdentityService:
-        def resolve_google_identity(self, **_):
-            return user_document()
+    asyncio.run(auth._send_confirmation_email("ola@example.com", "Ola"))
 
-    class FakeSessionService:
-        def create_session(self, _user):
-            return "raw-browser-secret", session_document()
-
-        def csrf_token(self, raw_token):
-            assert raw_token == "raw-browser-secret"
-            return "csrf-public-value"
-
-    async def verified_token(_):
-        return {
-            "sub": "google-subject",
-            "email": "ola@gmail.com",
-            "email_verified": True,
-            "given_name": "Ola",
-            "family_name": "Nordmann",
-        }
-
-    monkeypatch.setattr(auth, "IdentityService", FakeIdentityService)
-    monkeypatch.setattr(auth, "SessionService", FakeSessionService)
-    monkeypatch.setattr(auth, "verify_google_token", verified_token)
-
-    response = make_client().post("/google", json={"token": "valid-google-token"})
-
-    assert response.status_code == 200
-    assert response.json()["user_id"] == "internal-user-id"
-    assert response.json()["csrf_token"] == "csrf-public-value"
-    assert "raw-browser-secret" not in response.text
-    assert "httponly" in response.headers["set-cookie"].lower()
-    assert "barebonde_session=raw-browser-secret" in response.headers["set-cookie"]
-
-
-def test_google_auth_requires_a_verified_google_email(monkeypatch):
-    async def unverified_token(_):
-        return {"sub": "google-subject", "email": "ola@example.com", "email_verified": False}
-
-    monkeypatch.setattr(auth, "verify_google_token", unverified_token)
-
-    response = make_client().post("/google", json={"token": "invalid-google-token"})
-
-    assert response.status_code == 401
-    assert "bekreftet" in response.json()["detail"]
+    assert "https://barebonde.no/farm/setup?token=one-time-token" in sent[0]["body"]
 
 
 def test_passwordless_onboarding_profile_keeps_phone_number_without_accepting_a_password(monkeypatch):

@@ -25,7 +25,6 @@ class User:
         better_auth_id: str,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
-        google_id: Optional[str] = None,
         phone_number: Optional[str] = None,
         phone_verified: bool = False,
         address: Optional[str] = None,
@@ -46,7 +45,6 @@ class User:
         self.better_auth_id = better_auth_id  # Existing Cosmos partition key; retained for document compatibility.
         self.first_name = first_name
         self.last_name = last_name
-        self.google_id = google_id
         self.phone_number = phone_number
         self.phone_verified = phone_verified
         self.address = address
@@ -70,7 +68,6 @@ class User:
             "better_auth_id": self.better_auth_id,
             "first_name": self.first_name,
             "last_name": self.last_name,
-            "google_id": self.google_id,
             "phone_number": self.phone_number,
             "phone_verified": self.phone_verified,
             "address": self.address,
@@ -93,7 +90,6 @@ class User:
             better_auth_id=data.get("better_auth_id"),
             first_name=data.get("first_name"),
             last_name=data.get("last_name"),
-            google_id=data.get("google_id"),
             phone_number=data.get("phone_number"),
             phone_verified=data.get("phone_verified", False),
             address=data.get("address"),
@@ -113,6 +109,8 @@ class Farm:
         name: str,
         org_number: str,  # Partition key
         address: Optional[str] = None,
+        postal_code: Optional[str] = None,
+        city: Optional[str] = None,
         municipality: Optional[str] = None,
         brreg_verified: bool = False,
         organization_form: Optional[str] = None,
@@ -135,6 +133,8 @@ class Farm:
         self.name = name
         self.org_number = org_number  # Partition key
         self.address = address or ""
+        self.postal_code = postal_code or ""
+        self.city = city or ""
         self.municipality = municipality or ""
         self.brreg_verified = brreg_verified
         self.organization_form = organization_form or ""
@@ -161,6 +161,8 @@ class Farm:
             "name": self.name,
             "org_number": self.org_number,
             "address": self.address,
+            "postal_code": self.postal_code,
+            "city": self.city,
             "municipality": self.municipality,
             "brreg_verified": self.brreg_verified,
             "organization_form": self.organization_form,
@@ -187,6 +189,8 @@ class Farm:
             name=data.get("name"),
             org_number=data.get("org_number"),
             address=data.get("address"),
+            postal_code=data.get("postal_code"),
+            city=data.get("city"),
             municipality=data.get("municipality"),
             brreg_verified=data.get("brreg_verified", False),
             organization_form=data.get("organization_form"),

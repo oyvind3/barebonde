@@ -44,6 +44,8 @@ class FarmCreateRequest(BaseModel):
     name: str
     org_number: str
     address: Optional[str] = None
+    postal_code: Optional[str] = None
+    city: Optional[str] = None
     municipality: Optional[str] = None
     manual_entry: bool = False
     organization_form: Optional[str] = None
@@ -96,6 +98,8 @@ class FarmCreateRequest(BaseModel):
 class FarmUpdateRequest(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
+    postal_code: Optional[str] = None
+    city: Optional[str] = None
     municipality: Optional[str] = None
     primary_farm_type: Optional[str] = None
     production_types: Optional[list[str]] = None
@@ -138,6 +142,8 @@ class FarmResponse(BaseModel):
     name: str
     org_number: str
     address: Optional[str]
+    postal_code: str = ""
+    city: str = ""
     municipality: Optional[str]
     brreg_verified: bool = False
     organization_form: str = ""
@@ -180,6 +186,8 @@ def _farm_response(farm: dict[str, Any]) -> FarmResponse:
         name=model.name,
         org_number=model.org_number,
         address=model.address,
+        postal_code=model.postal_code,
+        city=model.city,
         municipality=model.municipality,
         brreg_verified=model.brreg_verified,
         organization_form=model.organization_form,
@@ -331,6 +339,8 @@ async def create_farm(
         name=request.name.strip() or (brreg_data or {}).get("name", ""),
         org_number=org_number,
         address=request.address or (brreg_data or {}).get("address", ""),
+        postal_code=request.postal_code or (brreg_data or {}).get("postal_code", ""),
+        city=request.city or (brreg_data or {}).get("city", ""),
         municipality=request.municipality or (brreg_data or {}).get("municipality", ""),
         brreg_verified=bool(brreg_data),
         organization_form=request.organization_form or (brreg_data or {}).get("organization_form", ""),

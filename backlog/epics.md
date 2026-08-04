@@ -6,18 +6,20 @@
 Brukere skal kunne logge sikkert inn og administrere tilgang.
 
 Mulige funksjoner:
-- Innlogging via Google og e-postlenke
+- Innlogging via e-postlenke
 - Serverstyrte sesjoner
 - Roller og rettigheter
 - Flere brukere per gård
 
 ### Pågående sak: profil ved onboarding
 
-- [x] Lagre navn, e-post, adresse og E.164-telefonnummer i Cosmos ved fullført e-post- eller Google-onboarding.
+- [x] Lagre navn, e-post, adresse og E.164-telefonnummer i Cosmos ved e-postverifisert onboarding.
 - [x] Del onboarding i korte steg for foretak, drift, personlig profil og betaling, og lagre strukturerte gårdsvalg for senere tilpasning.
-- [ ] Etabler serverstyrte sesjoner og autoritativ FarmUser-tilknytning etter Cosmos-bootstrap-fasen.
+- [x] Bekreft e-post med engangslenke før betalingsvalg og gårdsopprettelse.
+- [x] Fyll inn og lagre BRREG-adresse, postnummer og poststed for valgt foretak.
+- [x] Etabler serverstyrte sesjoner og autoritativ FarmUser-tilknytning etter Cosmos-bootstrap-fasen.
 
-Teknisk merknad: Bransje og selskapsform hentes fra BRREG når foretaket velges. Drifts- og modulvalg lagres på gårdsprofilen i Cosmos. Dagens onboarding er ikke den framtidige sikkerhetsgrensen for identitet eller tilgang.
+Teknisk merknad: Bransje, selskapsform og registrert adresse hentes fra BRREG når foretaket velges. Drifts- og modulvalg lagres på gårdsprofilen i Cosmos. Onboardingkladden i nettleseren er bare UX-støtte til e-postlenken; sesjonen og FarmUser er autoritative i backend.
 
 ---
 

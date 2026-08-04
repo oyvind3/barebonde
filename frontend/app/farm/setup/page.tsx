@@ -4,12 +4,11 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Navbar } from '@/components/navigation/Navbar'
-import { GoogleLoginButton, GoogleUser } from '@/components/auth/GoogleLoginButton'
 import { Button } from '@/components/ui/Button'
 import { Company, CompanySearch } from '@/components/ui/CompanySearch'
 import { apiFetch, bootstrapIdentity } from '@/lib/api'
 
-type SetupStep = 'business' | 'operations' | 'account' | 'payment' | 'confirmation'
+type SetupStep = 'business' | 'operations' | 'account' | 'verifyEmail' | 'payment' | 'confirmation'
 
 const setupSteps: Array<{ id: Exclude<SetupStep, 'confirmation'>; label: string }> = [
   { id: 'business', label: 'Foretak' },
@@ -53,6 +52,7 @@ const goalOptions = [
 
 const inputClass = 'w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-bonde-green focus:ring-2 focus:ring-bonde-green/20'
 const labelClass = 'mb-1.5 block text-xs font-bold uppercase tracking-wider text-stone-700'
+const ONBOARDING_DRAFT_KEY = 'barebonde_onboarding_draft'
 
 function toggleValue(values: string[], value: string): string[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
@@ -66,13 +66,17 @@ export default function FarmSetupPage() {
   const [resendLoading, setResendLoading] = useState(false)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ sent: boolean; message: string } | null>(null)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [emailVerified, setEmailVerified] = useState(false)
 
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [isManualMode, setIsManualMode] = useState(false)
   const [farmName, setFarmName] = useState('')
   const [orgNumber, setOrgNumber] = useState('')
-  const [address, setAddress] = useState('')
+  const [farmAddress, setFarmAddress] = useState('')
+  const [farmPostalCode, setFarmPostalCode] = useState('')
+  const [farmCity, setFarmCity] = useState('')
+  const [farmMunicipality, setFarmMunicipality] = useState('')
+  const [farmIndustryCode, setFarmIndustryCode] = useState('')
   const [organizationForm, setOrganizationForm] = useState('')
 
   const [primaryFarmType, setPrimaryFarmType] = useState('')
@@ -85,26 +89,83 @@ export default function FarmSetupPage() {
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
+  const [personalAddress, setPersonalAddress] = useState('')
   const [onboardingRole, setOnboardingRole] = useState('owner')
-  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null)
 
   const [paymentMethod, setPaymentMethod] = useState<'faktura' | 'vipps'>('faktura')
   const [billingEmail, setBillingEmail] = useState('')
 
-  const activeStepIndex = setupSteps.findIndex((item) => item.id === step)
+  const activeStepIndex = step === 'verifyEmail' ? 2 : setupSteps.findIndex((item) => item.id === step)
   const isSetupStep = step !== 'confirmation'
 
   useEffect(() => {
-    bootstrapIdentity()
-      .then((identity) => {
-        setIsAuthenticated(Boolean(identity))
+    const restoreDraft = () => {
+      const savedDraft = window.localStorage.getItem(ONBOARDING_DRAFT_KEY)
+      if (!savedDraft) return
+      try {
+        const draft = JSON.parse(savedDraft)
+        setFarmName(draft.farmName || '')
+        setOrgNumber(draft.orgNumber || '')
+        setFarmAddress(draft.farmAddress || '')
+        setFarmPostalCode(draft.farmPostalCode || '')
+        setFarmCity(draft.farmCity || '')
+        setFarmMunicipality(draft.farmMunicipality || '')
+        setFarmIndustryCode(draft.farmIndustryCode || '')
+        setOrganizationForm(draft.organizationForm || '')
+        setIsManualMode(Boolean(draft.isManualMode))
+        setPrimaryFarmType(draft.primaryFarmType || '')
+        setProductionTypes(Array.isArray(draft.productionTypes) ? draft.productionTypes : [])
+        setFarmSizeRange(draft.farmSizeRange || 'vet_ikke')
+        setTeamSize(draft.teamSize || '1')
+        setOnboardingGoals(Array.isArray(draft.onboardingGoals) ? draft.onboardingGoals : [])
+        setFirstName(draft.firstName || '')
+        setLastName(draft.lastName || '')
+        setEmail(draft.email || '')
+        setPhoneNumber(draft.phoneNumber || '')
+        setPersonalAddress(draft.personalAddress || '')
+        setOnboardingRole(draft.onboardingRole || 'owner')
+        setPaymentMethod(draft.paymentMethod || 'faktura')
+        setBillingEmail(draft.billingEmail || '')
+      } catch {
+        window.localStorage.removeItem(ONBOARDING_DRAFT_KEY)
+      }
+    }
+
+    const bootstrapOnboarding = async () => {
+      restoreDraft()
+      const token = new URLSearchParams(window.location.search).get('token')
+      if (token) {
+        try {
+          const response = await apiFetch('/api/auth/magic-link/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          })
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(data.detail || 'Bekreftelseslenken kunne ikke brukes.')
+          window.history.replaceState({}, '', '/farm/setup')
+          setEmailVerified(true)
+          setEmailStatus({ sent: true, message: 'E-postadressen er bekreftet.' })
+          setStep('payment')
+        } catch (verificationError) {
+          setError(verificationError instanceof Error ? verificationError.message : 'Bekreftelseslenken kunne ikke brukes.')
+          setStep('verifyEmail')
+        }
+      }
+
+      try {
+        const identity = await bootstrapIdentity()
         if (identity) {
           setFirstName((current) => current || identity.user.first_name)
           setLastName((current) => current || identity.user.last_name)
           setEmail((current) => current || identity.user.email)
         }
-      })
-      .catch(() => setIsAuthenticated(false))
+      } catch {
+        // A visitor has no session until the e-mail link has been used.
+      }
+    }
+
+    bootstrapOnboarding()
   }, [])
 
   const handleCompanySelect = (company: Company) => {
@@ -112,15 +173,11 @@ export default function FarmSetupPage() {
     setFarmName(company.name)
     setOrgNumber(company.org_number)
     setOrganizationForm(company.organization_form || '')
-    if (company.address) setAddress((currentAddress) => currentAddress || company.address || '')
-    setError(null)
-  }
-
-  const handleGoogleSignup = (user: GoogleUser) => {
-    setGoogleUser(user)
-    setFirstName(user.first_name)
-    setLastName(user.last_name)
-    setEmail(user.email)
+    setFarmAddress(company.address || '')
+    setFarmPostalCode(company.postal_code || '')
+    setFarmCity(company.city || '')
+    setFarmMunicipality(company.municipality || '')
+    setFarmIndustryCode(company.industry_code || '')
     setError(null)
   }
 
@@ -147,13 +204,64 @@ export default function FarmSetupPage() {
     setStep('account')
   }
 
-  const goToPayment = () => {
+  const saveOnboardingDraft = () => {
+    window.localStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify({
+      farmName,
+      orgNumber,
+      farmAddress,
+      farmPostalCode,
+      farmCity,
+      farmMunicipality,
+      farmIndustryCode,
+      organizationForm,
+      isManualMode,
+      primaryFarmType,
+      productionTypes,
+      farmSizeRange,
+      teamSize,
+      onboardingGoals,
+      firstName,
+      lastName,
+      email,
+      phoneNumber,
+      personalAddress,
+      onboardingRole,
+      paymentMethod,
+      billingEmail,
+    }))
+  }
+
+  const requestEmailVerification = async () => {
     if (!firstName.trim() || !lastName.trim() || !email.trim() || !phoneNumber.trim()) {
       setError('Fyll ut navn, e-postadresse og telefonnummer før du går videre.')
       return
     }
+    setLoading(true)
     setError(null)
-    setStep('payment')
+    saveOnboardingDraft()
+    try {
+      const response = await apiFetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          email: email.trim(),
+          phone_number: phoneNumber.trim(),
+          address: personalAddress.trim() || undefined,
+          onboarding_role: onboardingRole,
+        }),
+      })
+      const registration = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(registration.detail || 'Kunne ikke lagre profilen.')
+      if (!registration.email_sent) throw new Error(registration.email_message || 'Kunne ikke sende bekreftelses-e-post.')
+      setEmailStatus({ sent: true, message: registration.email_message || 'Bekreftelses-e-post er sendt.' })
+      setStep('verifyEmail')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Kunne ikke starte e-postbekreftelsen. Prøv igjen.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleResendEmail = async () => {
@@ -167,9 +275,9 @@ export default function FarmSetupPage() {
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.detail || 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
-      setResendMessage(data.message || `Ny innloggingslenke er sendt til ${email}.`)
+      setResendMessage(data.message || `Ny bekreftelseslenke er sendt til ${email}.`)
     } catch (requestError) {
-      setResendMessage(requestError instanceof Error ? requestError.message : 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
+      setResendMessage(requestError instanceof Error ? requestError.message : 'Kunne ikke sende bekreftelseslenken på nytt. Prøv igjen senere.')
     } finally {
       setResendLoading(false)
     }
@@ -184,42 +292,26 @@ export default function FarmSetupPage() {
     const finalOrgNumber = selectedCompany?.org_number || orgNumber.trim()
 
     try {
+      if (!emailVerified) {
+        throw new Error('Bekreft e-postadressen før du oppretter gården.')
+      }
       const identity = await bootstrapIdentity()
       if (!identity) {
-        throw new Error('Logg inn med Google eller e-postlenke før du oppretter gården.')
+        throw new Error('Bekreft e-postadressen fra lenken før du oppretter gården.')
       }
-      const registrationResponse = await apiFetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        email: email.trim(),
-        phone_number: phoneNumber.trim(),
-        google_token: googleUser?.credential,
-        address: address.trim() || undefined,
-        onboarding_role: onboardingRole,
-        farm_name: finalFarmName,
-        org_number: finalOrgNumber || undefined,
-        }),
-      })
-      const registration = await registrationResponse.json().catch(() => ({}))
-      if (!registrationResponse.ok) throw new Error(registration.detail || 'Kunne ikke lagre profilen.')
-      setEmailStatus({
-        sent: Boolean(registration.email_sent),
-        message: registration.email_message || registration.message,
-      })
       const farmResponse = await apiFetch('/api/farms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: finalFarmName,
           org_number: finalOrgNumber,
-          address: address.trim() || selectedCompany?.address || '',
-          municipality: selectedCompany?.municipality || '',
+          address: farmAddress.trim(),
+          postal_code: farmPostalCode.trim(),
+          city: farmCity.trim(),
+          municipality: farmMunicipality.trim(),
           manual_entry: isManualMode,
-          organization_form: organizationForm || selectedCompany?.organization_form || '',
-          industry_code: selectedCompany?.industry_code || '',
+          organization_form: organizationForm,
+          industry_code: farmIndustryCode,
           primary_farm_type: primaryFarmType,
           production_types: productionTypes,
           farm_size_range: farmSizeRange,
@@ -233,6 +325,7 @@ export default function FarmSetupPage() {
       if (!farmResponse.ok) throw new Error(farm.detail || 'Kunne ikke opprette gården.')
       const updatedIdentity = await bootstrapIdentity(farm.id)
       if (updatedIdentity?.active_farm?.id) window.localStorage.setItem('barebonde_active_farm_id', updatedIdentity.active_farm.id)
+      window.localStorage.removeItem(ONBOARDING_DRAFT_KEY)
       setStep('confirmation')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Kunne ikke fullføre registreringen. Prøv igjen.')
@@ -266,7 +359,7 @@ export default function FarmSetupPage() {
           {isSetupStep && (
             <ol className="mb-7 grid grid-cols-4 gap-2" aria-label="Fremdrift i oppsettet">
               {setupSteps.map((item, index) => {
-                const isActive = item.id === step
+                const isActive = item.id === step || (step === 'verifyEmail' && item.id === 'account')
                 const isComplete = index < activeStepIndex
                 return (
                   <li key={item.id} className="min-w-0 text-center">
@@ -308,6 +401,7 @@ export default function FarmSetupPage() {
                           <div>
                             <p className="font-semibold">{selectedCompany.name}</p>
                             <p className="mt-1 text-xs">Org.nr. {selectedCompany.org_number}{selectedCompany.municipality ? ` · ${selectedCompany.municipality}` : ''}</p>
+                            {(farmAddress || farmPostalCode || farmCity) && <p className="mt-1 text-xs">{farmAddress}{farmPostalCode || farmCity ? ` · ${farmPostalCode} ${farmCity}`.trim() : ''}</p>}
                           </div>
                           <span className="rounded-full bg-emerald-200 px-2.5 py-1 text-[11px] font-bold text-emerald-800">Hentet fra BRREG</span>
                         </div>
@@ -317,6 +411,11 @@ export default function FarmSetupPage() {
                             <div><dt className="font-semibold">Bransje</dt><dd>{selectedCompany.industry_code || 'Ikke oppgitt'}</dd></div>
                           </dl>
                         )}
+                        <div className="mt-4 grid gap-3 border-t border-emerald-200 pt-4 sm:grid-cols-2">
+                          <div className="sm:col-span-2"><label className={labelClass} htmlFor="farm-address">Gårdens adresse</label><input id="farm-address" value={farmAddress} onChange={(event) => setFarmAddress(event.target.value)} className={inputClass} autoComplete="organization street-address" /></div>
+                          <div><label className={labelClass} htmlFor="farm-postal-code">Postnummer</label><input id="farm-postal-code" value={farmPostalCode} onChange={(event) => setFarmPostalCode(event.target.value.replace(/\D/g, '').slice(0, 4))} className={inputClass} inputMode="numeric" autoComplete="postal-code" /></div>
+                          <div><label className={labelClass} htmlFor="farm-city">Poststed</label><input id="farm-city" value={farmCity} onChange={(event) => setFarmCity(event.target.value)} className={inputClass} autoComplete="address-level2" /></div>
+                        </div>
                       </div>
                     )}
                     <button type="button" onClick={() => { setIsManualMode(true); setSelectedCompany(null); setError(null) }} className="text-sm font-medium text-bonde-green underline underline-offset-2">
@@ -343,6 +442,18 @@ export default function FarmSetupPage() {
                           <option value="SA">Samvirkeforetak</option>
                           <option value="annet">Annet</option>
                         </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className={labelClass} htmlFor="farm-address">Gårdens adresse</label>
+                        <input id="farm-address" value={farmAddress} onChange={(event) => setFarmAddress(event.target.value)} className={inputClass} autoComplete="organization street-address" placeholder="Gårdsveien 14" />
+                      </div>
+                      <div>
+                        <label className={labelClass} htmlFor="farm-postal-code">Postnummer</label>
+                        <input id="farm-postal-code" value={farmPostalCode} onChange={(event) => setFarmPostalCode(event.target.value.replace(/\D/g, '').slice(0, 4))} className={inputClass} inputMode="numeric" autoComplete="postal-code" placeholder="2350" />
+                      </div>
+                      <div>
+                        <label className={labelClass} htmlFor="farm-city">Poststed</label>
+                        <input id="farm-city" value={farmCity} onChange={(event) => setFarmCity(event.target.value)} className={inputClass} autoComplete="address-level2" placeholder="Nes på Hedmarken" />
                       </div>
                     </div>
                     <button type="button" onClick={() => { setIsManualMode(false); setError(null) }} className="text-sm font-medium text-bonde-green underline underline-offset-2">
@@ -431,27 +542,8 @@ export default function FarmSetupPage() {
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 3 av 4</p>
                   <h2 className="mt-1 text-xl font-semibold">Hvem skal bruke Barebonde?</h2>
-                  <p className="mt-1 text-sm text-stone-600">Telefonnummeret lagres sammen med profilen din for kontosikkerhet og senere varsling.</p>
+                  <p className="mt-1 text-sm text-stone-600">Vi bruker opplysningene til å sette opp kontoen og tilpasse opplevelsen. E-postadressen bekreftes før dere velger betaling.</p>
                 </div>
-
-                {googleUser ? (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
-                    Google-kontoen <strong>{googleUser.email}</strong> er verifisert. Profilen lagres når du fullfører oppsettet.
-                  </div>
-                ) : (
-                  <div>
-                    <GoogleLoginButton onSuccess={(user) => { setIsAuthenticated(true); handleGoogleSignup(user) }} onError={setError} redirectTo={null} />
-                    <div className="relative my-6 text-center"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-stone-200" /></div><span className="relative bg-white px-3 text-xs font-bold uppercase tracking-wider text-stone-400">eller med e-post</span></div>
-                  </div>
-                )}
-
-                {!isAuthenticated && !googleUser && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                    <p className="font-semibold">Logg inn før du oppretter gården</p>
-                    <p className="mt-1 text-xs">Bruk Google over, eller få en sikker engangslenke på e-post. Gårdens eier hentes alltid fra den innloggede kontoen.</p>
-                    <Link href="/login" className="mt-3 inline-block text-sm font-medium text-bonde-green underline underline-offset-2">Logg inn med e-postlenke</Link>
-                  </div>
-                )}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div><label className={labelClass} htmlFor="first-name">Fornavn *</label><input id="first-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} className={inputClass} autoComplete="given-name" placeholder="Ola" /></div>
@@ -459,7 +551,7 @@ export default function FarmSetupPage() {
                 </div>
                 <div><label className={labelClass} htmlFor="email">E-postadresse *</label><input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} className={inputClass} autoComplete="email" placeholder="ola@eksempel.no" /></div>
                 <div><label className={labelClass} htmlFor="phone">Telefonnummer *</label><input id="phone" type="tel" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} className={inputClass} autoComplete="tel" inputMode="tel" placeholder="+47 912 34 567" /><p className="mt-1.5 text-xs text-stone-500">Norske åttesifrede numre lagres som +47. Andre nummer må ha landskode.</p></div>
-                <div><label className={labelClass} htmlFor="address">Adresse</label><input id="address" value={address} onChange={(event) => setAddress(event.target.value)} className={inputClass} autoComplete="street-address" placeholder="Gårdsveien 14, 2350 Nes" /></div>
+                <div><label className={labelClass} htmlFor="personal-address">Din adresse <span className="normal-case font-normal text-stone-500">(valgfritt)</span></label><input id="personal-address" value={personalAddress} onChange={(event) => setPersonalAddress(event.target.value)} className={inputClass} autoComplete="street-address" placeholder="Svennerudvegen 221" /></div>
 
                 <fieldset>
                   <legend className={labelClass}>Hva er rollen din på gården?</legend>
@@ -470,12 +562,33 @@ export default function FarmSetupPage() {
                   </div>
                 </fieldset>
 
-                {!googleUser && <p className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">Du trenger ikke passord. Etter oppsettet får du en sikker engangslenke på e-post når du vil logge inn.</p>}
+                <p className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">Du trenger ikke passord. Vi sender en sikker engangslenke som bekrefter e-postadressen før dere går videre til betaling.</p>
 
                 <div className="flex gap-3">
                   <Button type="button" variant="secondary" onClick={() => { setError(null); setStep('operations') }}>Tilbake</Button>
-                  <Button type="button" onClick={goToPayment} fullWidth showArrow>Fortsett</Button>
+                  <Button type="button" onClick={requestEmailVerification} disabled={loading} fullWidth showArrow>{loading ? 'Sender lenke...' : 'Bekreft e-post'}</Button>
                 </div>
+              </div>
+            )}
+
+            {step === 'verifyEmail' && (
+              <div className="space-y-7">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 3 av 4</p>
+                  <h2 className="mt-1 text-xl font-semibold">Bekreft e-postadressen din</h2>
+                  <p className="mt-1 text-sm text-stone-600">Vi har sendt en engangslenke til <strong>{email}</strong>. Åpne lenken for å bekrefte e-postadressen og fortsette til betaling.</p>
+                </div>
+
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+                  <p className="font-semibold">Sjekk innboksen din</p>
+                  <p className="mt-1 text-xs">Lenken kan brukes én gang og utløper etter kort tid. Du kommer tilbake hit automatisk når e-postadressen er bekreftet.</p>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button type="button" variant="secondary" onClick={() => { setError(null); setStep('account') }}>Endre opplysninger</Button>
+                  <Button type="button" onClick={handleResendEmail} disabled={resendLoading} fullWidth>{resendLoading ? 'Sender...' : 'Send lenken på nytt'}</Button>
+                </div>
+                {resendMessage && <p className="text-sm text-stone-600">{resendMessage}</p>}
               </div>
             )}
 
@@ -516,14 +629,6 @@ export default function FarmSetupPage() {
               <div className="space-y-6 text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-bonde-green">✓</div>
                 <div><h2 className="text-2xl font-semibold">Gårdsprofilen er klar</h2><p className="mt-2 text-sm text-stone-600">{emailStatus?.message || 'Du er klar til å ta i bruk Barebonde.'}</p></div>
-                {!googleUser && (
-                  <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-left text-sm text-stone-700">
-                    <p className="font-semibold">Logg inn med e-postlenke</p>
-                    {emailStatus?.sent ? <p className="mt-1 text-xs">Vi har sendt en lenke til {email}. Bruk den for å logge inn.</p> : <p className="mt-1 text-xs">E-posttjenesten kunne ikke bekrefte leveringen. Du kan be om en ny lenke.</p>}
-                    <button type="button" onClick={handleResendEmail} disabled={resendLoading} className="mt-3 text-sm font-medium text-bonde-green underline underline-offset-2 disabled:opacity-50">{resendLoading ? 'Sender...' : 'Send innloggingslenke på nytt'}</button>
-                    {resendMessage && <p className="mt-2 text-xs text-stone-600">{resendMessage}</p>}
-                  </div>
-                )}
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <Button type="button" fullWidth onClick={() => router.push('/dashboard')}>Gå til oversikten</Button>
                   <Link href="/" className="inline-flex items-center justify-center rounded-lg border border-stone-200 px-6 py-3 text-xs font-medium uppercase tracking-wide text-stone-700 transition hover:bg-bonde-light sm:text-sm">Til forsiden</Link>

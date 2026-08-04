@@ -10,15 +10,15 @@ Barebonde bruker Next.js 14 med statisk eksport på Azure Static Web Apps og Fas
 
 **Status:** Delvis implementert
 
-Azure Cosmos DB er dokumentdatabasen. Gårdsobjekter, brukerprofiler og gårdstilknytninger lagres som dokumenter, og Azure Blob Storage lagrer dokumentfiler. `Farm` er den framtidige tenanten. `FarmUser` finnes som dokumentmodell, men er ennå ikke autoritativ medlemskaps- eller autoriseringskontroll.
+Azure Cosmos DB er dokumentdatabasen. Gårdsobjekter, brukerprofiler og gårdstilknytninger lagres som dokumenter, og Azure Blob Storage lagrer dokumentfiler. `Farm` er tenanten. `FarmUser` er autoritativ medlemskaps- og autoriseringskontroll for Farm-rutene. Regnskaps- og Blob-ruter sikres videre i neste fase.
 
 ## ADL-003: Identity og autorisering
 
 **Status:** Delvis implementert
 
-Identity bruker Google ID-token og e-postbasert engangsinnlogging. Sesjoner er ugjennomsiktige, serverstyrte Cosmos-dokumenter; bare et tilfeldig token ligger i en `HttpOnly`-cookie. `identity_lookups` bruker HMAC-baserte, formålsbundne ID-er for e-post og Google-subjekt. `/api/me` eksponerer bare bruker og sesjon, og CSRF-token kreves for tilbakekalling og logout.
+Identity bruker e-postbasert engangsinnlogging. Sesjoner er ugjennomsiktige, serverstyrte Cosmos-dokumenter; bare et tilfeldig token ligger i en `HttpOnly`-cookie. `identity_lookups` bruker HMAC-baserte, formålsbundne ID-er for e-post. `/api/me` eksponerer bruker, sesjon, aktive medlemskap og aktiv Farm, og CSRF-token kreves for muterende ruter.
 
-`users` beholder den eksisterende `/better_auth_id`-partisjonsnøkkelen. FarmUser er ennå ikke en autoritativ medlemskaps- eller autoriseringskontroll, så Identity skal ikke brukes som tenant- eller abonnementsbeslutning før den modulen er laget.
+`users` beholder den eksisterende `/better_auth_id`-partisjonsnøkkelen. FarmUser brukes som autoritativ tenant- og rollekontroll for Farm-ruter. Abonnement og entitlements er fortsatt ikke implementert.
 
 Ory/Kratos, Better Auth, SQLAlchemy, PostgreSQL og ID-porten er ikke del av målarkitekturen.
 
@@ -42,4 +42,4 @@ Database- og containeropprettelse, samt partisjonsnøkkelvalidering, er flyttet 
 
 ## Neste arkitekturarbeid
 
-`Autoritativ FarmUser-tilknytning og tenant-autorisering`.
+`Tenant-sikring av bilag, dokumenter, bokføring, rapporter og Blob-tilgang`.

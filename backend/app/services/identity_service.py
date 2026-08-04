@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from azure.cosmos import exceptions
 
-from app.core.security_tokens import email_lookup_identifier, google_lookup_identifier
+from app.core.security_tokens import email_lookup_identifier
 from app.db.cosmos_client import get_identity_lookups_container, get_users_container
 from app.db.cosmos_models import User
 
@@ -42,7 +42,7 @@ class IdentityService:
 
     ``users`` retains its legacy ``/better_auth_id`` partition key. The new
     lookup container is only an opaque index and deliberately holds neither
-    e-mail addresses nor Google subjects.
+    e-mail addresses.
     """
 
     def __init__(self, *, users_container: Any | None = None, lookups_container: Any | None = None):
@@ -177,8 +177,7 @@ class IdentityService:
             )
         return user
 
-    def _new_user(self, *, email: str, first_name: str = "Bonde", last_name: str = "", google_id: str | None = None,
-                  picture: str | None = None) -> dict[str, Any]:
+    def _new_user(self, *, email: str, first_name: str = "Bonde", last_name: str = "") -> dict[str, Any]:
         user_id = str(uuid4())
         user = User(
             id=user_id,
@@ -187,73 +186,11 @@ class IdentityService:
             better_auth_id=f"user_{user_id}",
             first_name=first_name.strip() or "Bonde",
             last_name=last_name.strip(),
-            google_id=google_id,
             status="active",
             identity_version=1,
         ).to_dict()
-        if picture:
-            user["picture"] = picture
         self.users.create_item(user)
         return user
-
-    @staticmethod
-    def _google_email_can_link_existing_account(email: str, hosted_domain: str | None) -> bool:
-        """Only auto-link an existing account when Google is authoritative for e-mail."""
-        return email.endswith("@gmail.com") or bool(hosted_domain)
-
-    def resolve_google_identity(
-        self,
-        *,
-        google_id: str,
-        email: str,
-        first_name: str,
-        last_name: str = "",
-        picture: str | None = None,
-        hosted_domain: str | None = None,
-    ) -> dict[str, Any]:
-        normalized_email = normalize_email(email)
-        google_lookup_id = google_lookup_identifier(google_id)
-        user = self._lookup_user(google_lookup_id)
-        if user is None:
-            legacy_google = self._find_legacy_user(field="google_id", value=google_id)
-            if legacy_google is not None:
-                user = legacy_google
-                self._ensure_lookup(lookup_id=google_lookup_id, lookup_type="google_subject", user=user)
-
-        # Google ``sub`` is the stable provider identifier. Once it is linked,
-        # a later Google e-mail-address change must not block the user or make
-        # us compare it with an unrelated legacy e-mail profile.
-        if user:
-            return user
-
-        email_user = self._find_by_email(normalized_email)
-
-        if email_user is not None:
-            if not self._google_email_can_link_existing_account(normalized_email, hosted_domain):
-                raise IdentityConflictError(
-                    "Google kan ikke automatisk koble denne eksterne e-postadressen. Logg inn med e-postlenke først."
-                )
-            user = email_user
-            if not user.get("google_id"):
-                user["google_id"] = google_id
-                user["updated_at"] = utc_now()
-                self.users.upsert_item(user)
-            elif user.get("google_id") != google_id:
-                raise IdentityConflictError("E-postadressen er allerede koblet til en annen Google-konto.")
-        else:
-            user = self._new_user(
-                email=normalized_email,
-                first_name=first_name,
-                last_name=last_name,
-                google_id=google_id,
-                picture=picture,
-            )
-            self._ensure_lookup(
-                lookup_id=email_lookup_identifier(normalized_email), lookup_type="email", user=user
-            )
-
-        self._ensure_lookup(lookup_id=google_lookup_id, lookup_type="google_subject", user=user)
-        return self._require_active(user)
 
     def resolve_email_identity(self, *, email: str, first_name: str = "Bonde") -> dict[str, Any]:
         normalized_email = normalize_email(email)

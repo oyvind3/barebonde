@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { GoogleLoginButton } from '@/components/auth/GoogleLoginButton'
 import { apiFetch, rememberCsrfToken } from '@/lib/api'
 
 export default function LoginPage() {
@@ -84,7 +83,7 @@ export default function LoginPage() {
                 Velkommen tilbake
               </h1>
               <p className="text-stone-600 text-sm">
-                Velg Google eller få en sikker engangslenke på e-post.
+                Få en sikker engangslenke på e-post.
               </p>
             </div>
 
@@ -98,27 +97,6 @@ export default function LoginPage() {
                 {message}
               </div>
             )}
-
-            {/* Google Sign-In Button */}
-            <GoogleLoginButton
-              onSuccess={() => {
-                // Google auth component handles redirect
-              }}
-              onError={(errorMsg) => {
-                setError(errorMsg)
-              }}
-              className="mb-6"
-            />
-
-            {/* Separator */}
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-stone-200"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-stone-600">eller</span>
-              </div>
-            </div>
 
             {/* E-mail one-time-link form */}
             <form onSubmit={handleLogin} className="space-y-5">
