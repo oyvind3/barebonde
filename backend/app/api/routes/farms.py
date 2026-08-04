@@ -248,7 +248,7 @@ async def search_companies(q: str) -> list[BrregLookupResponse]:
         logger.error("BRREG search failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Klarte ikke hente data fra Brønnøysund akkurat nå. Prøv igjen.",
+            detail="Klarte ikke hente data fra Brønnøysundregistrene akkurat nå. Prøv igjen.",
         ) from exc
 
 
@@ -263,10 +263,10 @@ async def lookup_org_number(org_number: str) -> BrregLookupResponse:
         logger.error("BRREG lookup failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Klarte ikke hente data fra Brønnøysund akkurat nå. Prøv igjen.",
+            detail="Klarte ikke hente data fra Brønnøysundregistrene akkurat nå. Prøv igjen.",
         ) from exc
     if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fant ikke organisasjonsnummeret i Brønnøysundregisteret")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fant ikke organisasjonsnummeret i Brønnøysundregistrene")
     return BrregLookupResponse(**result)
 
 
@@ -326,12 +326,12 @@ async def create_farm(
             logger.error("BRREG lookup during farm creation failed: %s", exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Klarte ikke hente data fra Brønnøysund akkurat nå. Prøv igjen.",
+                detail="Klarte ikke hente data fra Brønnøysundregistrene akkurat nå. Prøv igjen.",
             ) from exc
         if not brreg_data and not request.manual_entry:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Organisasjonsnummeret finnes ikke i Brønnøysundregisteret.",
+                detail="Organisasjonsnummeret finnes ikke i Brønnøysundregistrene.",
             )
 
     farm = Farm(

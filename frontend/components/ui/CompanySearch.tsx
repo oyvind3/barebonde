@@ -24,7 +24,7 @@ interface CompanySearchProps {
 export function CompanySearch({
   onSelect,
   placeholder = 'Søk orgnr (9 siffer) eller bedriftsnavn...',
-  label = 'Søk i Brønnøysundregisteret',
+  label = 'Søk i Brønnøysundregistrene',
 }: CompanySearchProps) {
   const [query, setQuery] = useState('')
   const [results, setSearchResults] = useState<Company[]>([])
@@ -111,7 +111,7 @@ export function CompanySearch({
 
         setSearchResults(companies)
       } catch {
-        setSearchError('Klarte ikke hente fra Brønnøysund akkurat nå.')
+        setSearchError('Klarte ikke hente fra Brønnøysundregistrene akkurat nå.')
       } finally {
         setIsSearching(false)
       }

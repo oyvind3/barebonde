@@ -184,7 +184,7 @@ export default function FarmSetupPage() {
   const goToOperations = () => {
     const hasCompany = Boolean(selectedCompany && !isManualMode)
     if (!hasCompany && !farmName.trim()) {
-      setError('Velg foretak i Brønnøysundregisteret eller skriv inn gårdsnavnet.')
+      setError('Velg foretak i Brønnøysundregistrene eller skriv inn gårdsnavnet.')
       return
     }
     setError(null)
@@ -385,7 +385,7 @@ export default function FarmSetupPage() {
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 1 av 4</p>
                   <h2 className="mt-1 text-xl font-semibold">Hvilket foretak gjelder det?</h2>
-                  <p className="mt-1 text-sm text-stone-600">Søk i Brønnøysundregisteret, så fyller vi ut selskapsform og bransje der det finnes.</p>
+                  <p className="mt-1 text-sm text-stone-600">Søk i Brønnøysundregistrene, så fyller vi ut selskapsform og bransje der det finnes.</p>
                 </div>
 
                 {!isManualMode ? (
@@ -403,7 +403,7 @@ export default function FarmSetupPage() {
                             <p className="mt-1 text-xs">Org.nr. {selectedCompany.org_number}{selectedCompany.municipality ? ` · ${selectedCompany.municipality}` : ''}</p>
                             {(farmAddress || farmPostalCode || farmCity) && <p className="mt-1 text-xs">{farmAddress}{farmPostalCode || farmCity ? ` · ${farmPostalCode} ${farmCity}`.trim() : ''}</p>}
                           </div>
-                          <span className="rounded-full bg-emerald-200 px-2.5 py-1 text-[11px] font-bold text-emerald-800">Hentet fra BRREG</span>
+                          <span className="rounded-full bg-emerald-200 px-2.5 py-1 text-[11px] font-bold text-emerald-800">Hentet fra Brønnøysundregistrene</span>
                         </div>
                         {(selectedCompany.organization_form || selectedCompany.industry_code) && (
                           <dl className="mt-3 grid gap-2 border-t border-emerald-200 pt-3 text-xs sm:grid-cols-2">
@@ -457,7 +457,7 @@ export default function FarmSetupPage() {
                       </div>
                     </div>
                     <button type="button" onClick={() => { setIsManualMode(false); setError(null) }} className="text-sm font-medium text-bonde-green underline underline-offset-2">
-                      Tilbake til søk i Brønnøysundregisteret
+                      Tilbake til søk i Brønnøysundregistrene
                     </button>
                   </div>
                 )}
