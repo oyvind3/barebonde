@@ -80,6 +80,7 @@ class AuthResponse(BaseModel):
 class MagicLinkRequest(BaseModel):
     email: EmailStr
     first_name: Optional[str] = "Bonde"
+    return_to: Optional[str] = None
 
 
 class MagicLinkVerifyRequest(BaseModel):
@@ -156,6 +157,14 @@ async def _send_plunk_email(*, to: str, subject: str, body: str) -> None:
 
 def _frontend_url() -> str:
     return (os.getenv("FRONTEND_URL") or DEFAULT_FRONTEND_URL).rstrip("/")
+
+
+def _safe_return_to(value: Optional[str]) -> str:
+    """Allow only known internal paths; never reflect an external redirect."""
+    candidate = (value or "").strip()
+    if candidate.startswith("/invitations/accept?intent=") or candidate in {"/dashboard", "/onboarding"}:
+        return candidate
+    return "/onboarding"
 
 
 def _identity_cookie_options() -> dict[str, Any]:
@@ -357,7 +366,8 @@ async def request_login_email(req: MagicLinkRequest) -> dict[str, str]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account_not_found") from exc
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke kontrollere kontoen akkurat nå.") from exc
     try:
-        await _send_plunk_email(to=str(req.email), subject="Din innloggingslenke til Barebonde", body=f"<p><a href='{_frontend_url()}/login?token={raw_token}'>Logg inn i Barebonde</a></p>")
+        return_to = _safe_return_to(req.return_to)
+        await _send_plunk_email(to=str(req.email), subject="Din innloggingslenke til Barebonde", body=f"<p><a href='{_frontend_url()}/login?token={raw_token}&returnTo={html.escape(return_to, quote=True)}'>Logg inn i Barebonde</a></p>")
     except EmailDeliveryError as exc:
         logger.warning("Login email was not sent: %s", exc)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke sende e-post akkurat nå.") from exc
@@ -375,7 +385,8 @@ async def request_registration_email(req: MagicLinkRequest) -> dict[str, str]:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="account_already_exists") from exc
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke kontrollere kontoen akkurat nå.") from exc
     try:
-        await _send_plunk_email(to=str(req.email), subject="Bekreft og opprett Barebonde-konto", body=f"<p><a href='{_frontend_url()}/login?token={raw_token}&flow=register'>Bekreft e-postadressen</a></p>")
+        return_to = _safe_return_to(req.return_to)
+        await _send_plunk_email(to=str(req.email), subject="Bekreft og opprett Barebonde-konto", body=f"<p><a href='{_frontend_url()}/login?token={raw_token}&flow=register&returnTo={html.escape(return_to, quote=True)}'>Bekreft e-postadressen</a></p>")
     except EmailDeliveryError as exc:
         logger.warning("Registration email was not sent: %s", exc)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke sende e-post akkurat nå.") from exc

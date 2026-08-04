@@ -47,6 +47,8 @@ def headers(): return {"X-CSRF-Token":"csrf"}
 
 def test_norwegian_account_validation_normalization_and_masking():
     assert settings.normalize_account_number("8601.11.17947") == "86011117947"
+    # Regression: syntactically valid Modulus-11 test account from onboarding.
+    assert settings.normalize_account_number("18223822459") == "18223822459"
     assert settings.mask_account_number("86011117947") == "**** **** 947"
     with pytest.raises(ValueError): settings.normalize_account_number("123")
     with pytest.raises(ValueError): settings.normalize_account_number("86011117940")

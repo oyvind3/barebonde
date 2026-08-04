@@ -132,9 +132,17 @@ def create_bank_account(request: BankAccountCreate, access: AuthorizedFarm = Dep
     farm_id = str(access.farm["id"])
     account_id = f"bank-account:{farm_id}:{uuid4()}"
     document = {"id": account_id, "type": "bank_account", "farm_id": farm_id, "display_name": request.display_name.strip(), "account_number": request.account_number, "is_default": request.is_default or not any(item.get("is_default") and item.get("status") == "active" for item in _active_accounts(farm_id)), "status": "active", "created_by_user_id": access.current.user["user_id"], "version": 1, "created_at": now(), "updated_at": now()}
-    if document["is_default"]:
-        _clear_default(farm_id, except_id=account_id)
-    get_bank_accounts_container().create_item(document)
+    try:
+        if document["is_default"]:
+            _clear_default(farm_id, except_id=account_id)
+        get_bank_accounts_container().create_item(document)
+    except exceptions.CosmosHttpResponseError as exc:
+        # Missing/unavailable declared containers are an operations issue, not a
+        # client validation error. Do not expose Cosmos details or retry data.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="bank_accounts_unavailable",
+        ) from exc
     return _account_response(document, reveal=True)
 
 

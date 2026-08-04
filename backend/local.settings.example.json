@@ -13,6 +13,8 @@
     "IDENTITY_HMAC_KEY": "replace_with_a_distinct_long_random_local_secret",
     "IDENTITY_SESSION_TTL_SECONDS": "604800",
     "IDENTITY_MAGIC_LINK_TTL_SECONDS": "900",
+    "INVITATION_TTL_SECONDS": "604800",
+    "INVITATION_RESEND_COOLDOWN_SECONDS": "60",
     "API_PORT": "8000",
     "API_HOST": "0.0.0.0",
     "ENV": "development",
