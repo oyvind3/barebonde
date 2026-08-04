@@ -67,13 +67,37 @@ class InvitationService:
             "created_at": utc_now(), "updated_at": utc_now(),
             "expires_at": (now + timedelta(seconds=self.ttl_seconds)).isoformat(),
             "accepted_at": None, "accepted_by_user_id": None, "revoked_at": None, "revoked_by_user_id": None,
-            "send_count": 1, "last_sent_at": None, "failed_attempts": 0, "ttl": self.ttl_seconds, "version": 1,
+            "delivery_status": "pending", "send_count": 0, "last_sent_at": None, "last_send_failed_at": None, "failed_attempts": 0, "ttl": self.ttl_seconds, "version": 1,
         }
         try:
             self.invitations.create_item(document)
         except exceptions.CosmosResourceExistsError as exc:
             raise InvitationConflictError("invitation_already_pending") from exc
         return document, secret
+
+    def mark_delivery(self, invitation: dict[str, Any], *, sent: bool) -> dict[str, Any]:
+        now = utc_now()
+        invitation["delivery_status"] = "sent" if sent else "failed"
+        invitation["updated_at"] = now
+        if sent:
+            invitation["send_count"] = int(invitation.get("send_count") or 0) + 1
+            invitation["last_sent_at"] = now
+        else:
+            invitation["last_send_failed_at"] = now
+        self.invitations.upsert_item(invitation)
+        return invitation
+
+    def prepare_resend(self, *, farm_id: str, invitation_id: str) -> tuple[dict[str, Any], str]:
+        invitation = self.get_invitation(farm_id=farm_id, invitation_id=invitation_id)
+        if invitation.get("invitation_status") not in {"pending", "expired"}:
+            raise InvitationConflictError("invitation_not_found")
+        secret = new_opaque_token()
+        return invitation, secret
+
+    def complete_resend(self, invitation: dict[str, Any], secret: str) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        invitation.update({"invitation_status": "pending", "token_hash": self.token_hash(secret), "expires_at": (now + timedelta(seconds=self.ttl_seconds)).isoformat()})
+        return self.mark_delivery(invitation, sent=True)
 
     def list_invitations(self, farm_id: str) -> list[dict[str, Any]]:
         return list(self.invitations.query_items(query="SELECT * FROM c WHERE c.farm_id = @farm_id", parameters=[{"name": "@farm_id", "value": farm_id}], partition_key=farm_id))

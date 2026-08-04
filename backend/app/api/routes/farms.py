@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import NAMESPACE_URL, uuid4, uuid5
+import html
 
 from azure.cosmos import exceptions
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
@@ -254,6 +255,16 @@ def _write_audit_event(event_type: str, farm_id: str, user_id: str) -> None:
         logger.warning("Could not persist %s audit event for farm %s: %s", event_type, farm_id, exc)
 
 
+async def _send_invitation_email(*, invitation: dict[str, Any], token: str, farm: dict[str, Any], inviter: dict[str, Any]) -> None:
+    """Reuse the established Plunk sender; token only exists in this call's body."""
+    from app.api.routes.auth import _frontend_url, _send_plunk_email
+    role_name = {"manager": "Administrator", "staff": "Ansatt"}[invitation["invited_role"]]
+    inviter_name = html.escape(str(inviter.get("display_name") or inviter.get("first_name") or "En gårdseier"))
+    farm_name = html.escape(str(farm.get("name") or "gården"))
+    link = f"{_frontend_url()}/api/invitations/verify?token=v1.{farm['id']}.{invitation['id']}.{token}"
+    await _send_plunk_email(to=invitation["email"], subject=f"Du er invitert til {farm_name} i Barebonde", body=f"<p>{inviter_name} har invitert deg til <strong>{farm_name}</strong> som {role_name}.</p><p><a href='{link}'>Se invitasjonen</a></p><p>Hvis du ikke forventet invitasjonen, kan du ignorere denne e-posten.</p>")
+
+
 def _activate_provisioned_farm(*, service: MembershipService, farm: dict[str, Any], user_id: str) -> None:
     """Assign the initial plan before making a Farm tenant active."""
     try:
@@ -454,13 +465,14 @@ def list_farm_invitations(
 
 
 @router.post("/{farm_id}/invitations", response_model=InvitationResponse, status_code=status.HTTP_201_CREATED)
-def create_farm_invitation(
+async def create_farm_invitation(
     farm_id: str,
     request: InvitationCreateRequest,
     access: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_INVITE, require_csrf_protection=True)),
 ) -> InvitationResponse:
     try:
-        invitation, _ = InvitationService().create_invitation(
+        service = InvitationService()
+        invitation, token = service.create_invitation(
             farm=access.farm,
             email=str(request.email),
             role=request.role,
@@ -470,8 +482,32 @@ def create_farm_invitation(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except InvitationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    try:
+        await _send_invitation_email(invitation=invitation, token=token, farm=access.farm, inviter=access.current.user)
+        service.mark_delivery(invitation, sent=True)
+    except Exception as exc:
+        service.mark_delivery(invitation, sent=False)
+        logger.warning("Invitation email delivery failed for farm %s: %s", farm_id, exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="external_service_unavailable") from exc
     _write_audit_event("FarmInvitationCreated", farm_id, access.current.user["user_id"])
+    _write_audit_event("FarmInvitationSent", farm_id, access.current.user["user_id"])
     return InvitationResponse(**InvitationService().public_metadata(invitation))
+
+
+@router.post("/{farm_id}/invitations/{invitation_id}/resend", response_model=InvitationResponse)
+async def resend_farm_invitation(farm_id: str, invitation_id: str, access: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_INVITATION_RESEND, require_csrf_protection=True))) -> InvitationResponse:
+    service = InvitationService()
+    try:
+        invitation, token = service.prepare_resend(farm_id=farm_id, invitation_id=invitation_id)
+        await _send_invitation_email(invitation=invitation, token=token, farm=access.farm, inviter=access.current.user)
+        invitation = service.complete_resend(invitation, token)
+    except InvitationError as exc:
+        raise _not_found() from exc
+    except Exception as exc:
+        logger.warning("Invitation resend failed for farm %s: %s", farm_id, exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="external_service_unavailable") from exc
+    _write_audit_event("FarmInvitationResent", farm_id, access.current.user["user_id"])
+    return InvitationResponse(**service.public_metadata(invitation))
 
 
 @router.delete("/{farm_id}/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
