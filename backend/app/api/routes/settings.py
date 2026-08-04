@@ -85,6 +85,16 @@ def _settings(access: AuthorizedFarm) -> dict:
             return container.create_item(document)
         except exceptions.CosmosResourceExistsError:
             return container.read_item(item=identifier, partition_key=access.farm["id"])
+        except exceptions.CosmosHttpResponseError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="farm_settings_unavailable",
+            ) from exc
+    except exceptions.CosmosHttpResponseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="farm_settings_unavailable",
+        ) from exc
 
 
 @router.get("/farms/{farm_id}/settings")
