@@ -51,7 +51,12 @@ class SubscriptionService:
         except Exception as exc:
             logger.exception("Could not read subscription for Farm %s.", farm_id)
             raise SubscriptionUnavailableError("Subscription storage is unavailable.") from exc
-        if not isinstance(document, dict) or document.get("farm_id") != farm_id:
+        if (
+            not isinstance(document, dict)
+            or document.get("id") != self.subscription_id(farm_id)
+            or document.get("type") != "subscription"
+            or document.get("farm_id") != farm_id
+        ):
             logger.error("Invalid subscription document encountered for Farm %s.", farm_id)
             raise SubscriptionUnavailableError("Subscription data is invalid.")
         return dict(document)

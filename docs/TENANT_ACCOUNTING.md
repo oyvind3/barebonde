@@ -37,4 +37,4 @@ OCR kjører bare som del av den autoriserte opplastingsflyten og mottar filinnho
 
 Bilag-, rapport- og dashboard-sider henter aktiv Farm via `/api/me`; `localStorage` kan bare foreslå sist valgte Farm. Felles API-klient sender `credentials: include` og CSRF-token for mutasjoner. Direkte Blob-lenker er erstattet av en autorisert nedlastingsrequest.
 
-Denne fasen legger ikke til Subscription, Entitlements eller Usage. Generiske dokumenter, dokumentoppdatering/-sletting og eksterne transaksjons-CRUD-ruter finnes ikke i dagens produkt og er derfor ikke introdusert her.
+Denne fasen legger til Farm-eid Subscription og entitlement-gating på én avansert rapport, men ikke Usage. Generiske dokumenter, dokumentoppdatering/-sletting og eksterne transaksjons-CRUD-ruter finnes ikke i dagens produkt og er derfor ikke introdusert her.

@@ -26,7 +26,7 @@ Hver Farm har ett idempotent `subscriptions`-dokument med en statisk, versjonert
 
 ## Neste arbeid
 
-1. Free Subscription, statiske plan-definisjoner og Entitlement-gating på én faktisk funksjon.
+1. Kontrollert håndtering av legacy-dokumenter med `blob_url`.
 2. Rate limiting og sikkerhetsgjennomgang av Identity før bred produksjonsbruk.
 
 Bootstrap-skriptet finnes, men er ikke kjørt mot et reelt Cosmos-miljø som del av repository-arbeidet.

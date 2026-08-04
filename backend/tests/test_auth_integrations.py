@@ -229,9 +229,34 @@ def test_me_returns_only_active_memberships_and_validates_active_farm_preference
                 },
             ]
 
+    class FakeSubscriptionService:
+        def ensure_free_subscription(self, *, farm_id, actor_user_id=None):
+            return type(
+                "EnsuredSubscription",
+                (),
+                {
+                    "subscription": {
+                        "id": f"subscription:{farm_id}",
+                        "farm_id": farm_id,
+                        "plan_code": "free",
+                        "plan_version": "2026-08",
+                        "subscription_status": "active",
+                        "started_at": "2026-08-04T00:00:00+00:00",
+                        "current_period_start": None,
+                        "current_period_end": None,
+                        "trial_ends_at": None,
+                        "grace_period_ends_at": None,
+                        "cancel_at_period_end": False,
+                        "canceled_at": None,
+                    },
+                    "created": False,
+                },
+            )()
+
     monkeypatch.setattr(identity_dependency, "SessionService", FakeSessionService)
     monkeypatch.setattr(me, "SessionService", FakeSessionService)
     monkeypatch.setattr(me, "MembershipService", FakeMembershipService)
+    monkeypatch.setattr(me, "SubscriptionService", FakeSubscriptionService)
     client = make_client(include_me=True)
     cookies = {"barebonde_session": "browser-cookie"}
 

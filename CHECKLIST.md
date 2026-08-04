@@ -23,11 +23,6 @@
 
 E-postlenker er Identity-MVP, ikke en abonnementskilde. Ikke legg identitet eller rettigheter i `localStorage`; onboarding lagrer bare en kortvarig UX-kladd lokalt frem til e-postlenken er brukt. `IDENTITY_HMAC_KEY` må være satt før Identity-rutene aktiveres.
 
-## Subscription og entitlements
-
-- [x] Abonnement og entitlements per Farm med statiske, versjonerte planer og serverhåndhevet gate på avansert rapport.
-- [ ] Usage per Farm.
-
 ## Lokal kvalitetssjekk
 
 ```bash

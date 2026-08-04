@@ -97,4 +97,4 @@ docs/architecture/       Arkitekturbeslutninger
 
 ## Neste planlagte fase
 
-`Free Subscription, statiske plan-definisjoner og Entitlement-gating på én faktisk funksjon`.
+`Kontrollert håndtering av legacy-dokumenter med blob_url`.
