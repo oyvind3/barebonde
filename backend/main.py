@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api.routes import health, farms, accounting, auth, me, subscriptions
+from app.api.routes import health, farms, accounting, auth, me, subscriptions, profile, onboarding, settings as farm_settings
 
 
 app = FastAPI(
@@ -29,8 +29,11 @@ app.add_middleware(
 app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(me.router, prefix="/api", tags=["Identity"])
+app.include_router(profile.router, prefix="/api", tags=["Profile"])
+app.include_router(onboarding.router, prefix="/api", tags=["Onboarding"])
 app.include_router(farms.router, prefix="/api/farms", tags=["Farms"])
 app.include_router(subscriptions.router, prefix="/api", tags=["Subscriptions"])
+app.include_router(farm_settings.router, prefix="/api", tags=["Farm settings"])
 app.include_router(accounting.router, tags=["Accounting"])
 
 

@@ -6,6 +6,12 @@ from enum import Enum
 
 
 class Permission(str, Enum):
+    FARM_SETTINGS_READ = "farm.settings.read"
+    FARM_SETTINGS_UPDATE = "farm.settings.update"
+    BANK_ACCOUNT_READ = "bank_account.read"
+    BANK_ACCOUNT_CREATE = "bank_account.create"
+    BANK_ACCOUNT_UPDATE = "bank_account.update"
+    BANK_ACCOUNT_DELETE = "bank_account.delete"
     FARM_READ = "farm.read"
     FARM_UPDATE = "farm.update"
     FARM_ARCHIVE = "farm.archive"
@@ -33,6 +39,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     "owner": frozenset(Permission),
     "manager": frozenset(
         {
+            Permission.FARM_SETTINGS_READ,
+            Permission.FARM_SETTINGS_UPDATE,
             Permission.FARM_READ,
             Permission.FARM_UPDATE,
             Permission.MEMBER_LIST,

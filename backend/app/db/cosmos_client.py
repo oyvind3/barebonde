@@ -90,3 +90,11 @@ def get_identity_lookups_container() -> Any:
 def get_subscriptions_container() -> Any:
     """Return the existing Farm-partitioned subscription container proxy."""
     return get_container_client("subscriptions")
+
+
+def get_farm_settings_container() -> Any:
+    return get_container_client("farm_settings")
+
+
+def get_bank_accounts_container() -> Any:
+    return get_container_client("bank_accounts")

@@ -28,6 +28,8 @@ CONTAINER_DEFINITIONS: tuple[ContainerDefinition, ...] = (
     ContainerDefinition("auth_challenges", "/challenge_partition_id"),
     ContainerDefinition("identity_lookups", "/lookup_partition_id"),
     ContainerDefinition("subscriptions", "/farm_id"),
+    ContainerDefinition("farm_settings", "/farm_id"),
+    ContainerDefinition("bank_accounts", "/farm_id"),
 )
 
 CONTAINERS_BY_NAME = {definition.name: definition for definition in CONTAINER_DEFINITIONS}

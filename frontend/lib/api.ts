@@ -10,9 +10,12 @@ export type IdentityBootstrap = {
     email: string
     first_name: string
     last_name: string
+    display_name?: string
     picture?: string | null
     phone_number?: string | null
     status: string
+    email_verified?: boolean
+    profile_completed?: boolean
   }
   session: {
     session_id: string
@@ -56,6 +59,7 @@ export type IdentityBootstrap = {
     canceled_at?: string | null
   } | null
   entitlements: Record<string, boolean>
+  onboarding?: { completed: boolean; current_step: string; completed_steps: string[]; completion_percent: number; interests: string[] }
 }
 
 let csrfToken = ''

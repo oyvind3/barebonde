@@ -20,6 +20,7 @@ from app.services.entitlement_service import get_effective_entitlements
 from app.services.membership_service import MembershipService
 from app.services.session_service import SessionService
 from app.services.subscription_service import SubscriptionService, SubscriptionUnavailableError
+from app.api.routes.onboarding import onboarding_status
 
 router = APIRouter()
 
@@ -33,6 +34,9 @@ def user_response(user: dict) -> IdentityUserResponse:
         picture=user.get("picture"),
         phone_number=user.get("phone_number"),
         status=str(user.get("status") or "active"),
+        display_name=str(user.get("display_name") or " ".join(part for part in [str(user.get("first_name") or ""), str(user.get("last_name") or "")] if part)),
+        email_verified=bool(user.get("email_verified")),
+        profile_completed=bool(user.get("profile_completed")),
     )
 
 
@@ -115,4 +119,5 @@ def get_me(
         active_farm=active_farm,
         subscription=subscription,
         entitlements=entitlements,
+        onboarding=onboarding_status(current.user, [item.model_dump() for item in memberships]),
     )

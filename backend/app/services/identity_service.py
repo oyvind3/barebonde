@@ -97,6 +97,18 @@ class IdentityService:
         if "updated_at" not in user:
             user["updated_at"] = user.get("created_at") or utc_now()
             changed = True
+        defaults = {
+            "display_name": " ".join(part for part in [str(user.get("first_name") or ""), str(user.get("last_name") or "")] if part).strip(),
+            "preferred_language": "nb",
+            "timezone": "Europe/Oslo",
+            "email_verified": False,
+            "profile_completed": False,
+            "onboarding_interests": [],
+        }
+        for field, default in defaults.items():
+            if field not in user:
+                user[field] = default
+                changed = True
         self.user_partition_key(user)
         if changed:
             user["updated_at"] = utc_now()
@@ -189,7 +201,6 @@ class IdentityService:
             status="active",
             identity_version=1,
         ).to_dict()
-        self.users.create_item(user)
         return user
 
     def resolve_email_identity(self, *, email: str, first_name: str = "Bonde") -> dict[str, Any]:
@@ -197,8 +208,37 @@ class IdentityService:
         user = self._find_by_email(normalized_email)
         if user is not None:
             return user
+        # Claim the deterministic e-mail lookup before persisting a new User.
+        # This is the authoritative uniqueness boundary across concurrent
+        # registration requests and avoids creating a second profile first.
         user = self._new_user(email=normalized_email, first_name=first_name)
-        self._ensure_lookup(
-            lookup_id=email_lookup_identifier(normalized_email), lookup_type="email", user=user
-        )
+        try:
+            self._ensure_lookup(
+                lookup_id=email_lookup_identifier(normalized_email), lookup_type="email", user=user
+            )
+        except IdentityConflictError:
+            existing = self._find_by_email(normalized_email)
+            if existing is not None:
+                return existing
+            raise
+        try:
+            self.users.create_item(user)
+        except Exception as exc:
+            # The lookup remains a safe claim. A later request fails closed
+            # rather than creating a duplicate account.
+            raise IdentityError("Brukerkontoen kunne ikke opprettes trygt.") from exc
         return self._require_active(user)
+
+    def update_profile(self, user: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+        """Persist only validated, self-owned profile fields."""
+        document = dict(user)
+        document.update(updates)
+        document["display_name"] = str(document.get("display_name") or "").strip() or " ".join(
+            part for part in [str(document.get("first_name") or ""), str(document.get("last_name") or "")] if part
+        ).strip()
+        document["profile_completed"] = bool(
+            document.get("first_name") and document.get("last_name") and document.get("terms_accepted_at") and document.get("privacy_accepted_at")
+        )
+        document["updated_at"] = utc_now()
+        self.users.upsert_item(document)
+        return document

@@ -29,6 +29,18 @@ class User:
         phone_verified: bool = False,
         address: Optional[str] = None,
         onboarding_role: Optional[str] = None,
+        display_name: Optional[str] = None,
+        preferred_language: str = "nb",
+        timezone_name: str = "Europe/Oslo",
+        email_verified: bool = False,
+        profile_completed: bool = False,
+        terms_version: Optional[str] = None,
+        terms_accepted_at: Optional[datetime] = None,
+        privacy_version: Optional[str] = None,
+        privacy_accepted_at: Optional[datetime] = None,
+        onboarding_current_step: Optional[str] = None,
+        onboarding_interests: Optional[List[str]] = None,
+        onboarding_completed_at: Optional[datetime] = None,
         is_active: bool = True,
         id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -49,6 +61,18 @@ class User:
         self.phone_verified = phone_verified
         self.address = address
         self.onboarding_role = onboarding_role
+        self.display_name = display_name or " ".join(part for part in [first_name, last_name] if part).strip()
+        self.preferred_language = preferred_language
+        self.timezone_name = timezone_name
+        self.email_verified = email_verified
+        self.profile_completed = profile_completed
+        self.terms_version = terms_version
+        self.terms_accepted_at = terms_accepted_at
+        self.privacy_version = privacy_version
+        self.privacy_accepted_at = privacy_accepted_at
+        self.onboarding_current_step = onboarding_current_step
+        self.onboarding_interests = onboarding_interests or []
+        self.onboarding_completed_at = onboarding_completed_at
         self.is_active = is_active
         self.status = status or ("active" if is_active else "disabled")
         self.identity_version = identity_version
@@ -72,6 +96,18 @@ class User:
             "phone_verified": self.phone_verified,
             "address": self.address,
             "onboarding_role": self.onboarding_role,
+            "display_name": self.display_name,
+            "preferred_language": self.preferred_language,
+            "timezone": self.timezone_name,
+            "email_verified": self.email_verified,
+            "profile_completed": self.profile_completed,
+            "terms_version": self.terms_version,
+            "terms_accepted_at": self.terms_accepted_at.isoformat() if isinstance(self.terms_accepted_at, datetime) else self.terms_accepted_at,
+            "privacy_version": self.privacy_version,
+            "privacy_accepted_at": self.privacy_accepted_at.isoformat() if isinstance(self.privacy_accepted_at, datetime) else self.privacy_accepted_at,
+            "onboarding_current_step": self.onboarding_current_step,
+            "onboarding_interests": self.onboarding_interests,
+            "onboarding_completed_at": self.onboarding_completed_at.isoformat() if isinstance(self.onboarding_completed_at, datetime) else self.onboarding_completed_at,
             "is_active": self.is_active,
             "identity_version": self.identity_version,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
@@ -94,6 +130,18 @@ class User:
             phone_verified=data.get("phone_verified", False),
             address=data.get("address"),
             onboarding_role=data.get("onboarding_role"),
+            display_name=data.get("display_name"),
+            preferred_language=data.get("preferred_language", "nb"),
+            timezone_name=data.get("timezone", "Europe/Oslo"),
+            email_verified=data.get("email_verified", False),
+            profile_completed=data.get("profile_completed", False),
+            terms_version=data.get("terms_version"),
+            terms_accepted_at=datetime.fromisoformat(data.get("terms_accepted_at")) if data.get("terms_accepted_at") else None,
+            privacy_version=data.get("privacy_version"),
+            privacy_accepted_at=datetime.fromisoformat(data.get("privacy_accepted_at")) if data.get("privacy_accepted_at") else None,
+            onboarding_current_step=data.get("onboarding_current_step"),
+            onboarding_interests=data.get("onboarding_interests"),
+            onboarding_completed_at=datetime.fromisoformat(data.get("onboarding_completed_at")) if data.get("onboarding_completed_at") else None,
             is_active=data.get("is_active", True),
             identity_version=data.get("identity_version", 1),
             created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None,

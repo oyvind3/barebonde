@@ -17,6 +17,9 @@ class IdentityUserResponse(BaseModel):
     picture: Optional[str] = None
     phone_number: Optional[str] = None
     status: str
+    display_name: str = ""
+    email_verified: bool = False
+    profile_completed: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -94,6 +97,7 @@ class MeResponse(BaseModel):
     active_farm: Optional[FarmSnapshotResponse] = None
     subscription: Optional[SubscriptionResponse] = None
     entitlements: Dict[str, bool] = Field(default_factory=dict)
+    onboarding: Dict[str, object] = Field(default_factory=dict)
 
 
 class SessionListResponse(BaseModel):
