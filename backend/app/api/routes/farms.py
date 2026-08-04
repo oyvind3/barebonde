@@ -8,7 +8,7 @@ from typing import Any, Optional
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from azure.cosmos import exceptions
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.api.dependencies.farm_access import AuthorizedFarm, require_farm_permission
@@ -472,6 +472,19 @@ def create_farm_invitation(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     _write_audit_event("FarmInvitationCreated", farm_id, access.current.user["user_id"])
     return InvitationResponse(**InvitationService().public_metadata(invitation))
+
+
+@router.delete("/{farm_id}/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
+def revoke_farm_invitation(
+    farm_id: str,
+    invitation_id: str,
+    access: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_INVITATION_REVOKE, require_csrf_protection=True)),
+) -> None:
+    try:
+        InvitationService().revoke(farm_id=farm_id, invitation_id=invitation_id, actor_user_id=str(access.current.user["user_id"]))
+    except InvitationError as exc:
+        raise _not_found() from exc
+    _write_audit_event("FarmInvitationRevoked", farm_id, access.current.user["user_id"])
 
 
 @router.patch("/{farm_id}", response_model=FarmResponse)

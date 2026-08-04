@@ -136,3 +136,40 @@ class InvitationService:
         invitation.update({"invitation_status": "accepted", "accepted_at": now, "accepted_by_user_id": user["user_id"], "updated_at": now})
         self.invitations.upsert_item(invitation)
         return membership
+
+    def decline(self, *, intent: str, user: dict[str, Any]) -> dict[str, Any]:
+        invitation, verified_intent = self._invitation_for_intent(intent)
+        if intent != verified_intent:
+            raise InvitationError("invitation_not_found")
+        if normalize_email(str(user.get("email") or "")) != invitation["email_normalized"] or not user.get("email_verified"):
+            raise InvitationError("invitation_email_mismatch")
+        if invitation.get("invitation_status") == "declined":
+            return invitation
+        if invitation.get("invitation_status") != "pending":
+            raise InvitationConflictError("invitation_not_found")
+        now = utc_now()
+        invitation.update({"invitation_status": "declined", "declined_at": now, "declined_by_user_id": user["user_id"], "updated_at": now})
+        self.invitations.upsert_item(invitation)
+        return invitation
+
+    def revoke(self, *, farm_id: str, invitation_id: str, actor_user_id: str) -> dict[str, Any]:
+        invitation = self.get_invitation(farm_id=farm_id, invitation_id=invitation_id)
+        if invitation.get("invitation_status") == "revoked":
+            return invitation
+        if invitation.get("invitation_status") not in {"pending", "expired"}:
+            raise InvitationConflictError("invitation_not_found")
+        now = utc_now()
+        invitation.update({"invitation_status": "revoked", "revoked_at": now, "revoked_by_user_id": actor_user_id, "updated_at": now})
+        self.invitations.upsert_item(invitation)
+        return invitation
+
+    def _invitation_for_intent(self, intent: str) -> tuple[dict[str, Any], str]:
+        parts = intent.split(".")
+        if len(parts) != 3 or parts[0] != "v1":
+            raise InvitationError("invitation_not_found")
+        matches = list(self.invitations.query_items(query="SELECT * FROM c WHERE c.id = @id", parameters=[{"name": "@id", "value": parts[1]}], enable_cross_partition_query=True))
+        if len(matches) != 1:
+            raise InvitationError("invitation_not_found")
+        invitation = matches[0]
+        signature = hmac_identifier("farm-invitation-intent", f"{invitation['id']}:{invitation['token_hash']}")
+        return invitation, f"v1.{invitation['id']}.{signature}"

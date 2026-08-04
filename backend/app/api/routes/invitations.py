@@ -26,3 +26,11 @@ def accept_invitation(request: InvitationIntentRequest, current: CurrentIdentity
     except InvitationError as exc:
         code = str(exc)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN if code == 'invitation_email_mismatch' else status.HTTP_404_NOT_FOUND, detail=code) from exc
+
+@router.post('/invitations/decline')
+def decline_invitation(request: InvitationIntentRequest, current: CurrentIdentity = Depends(require_csrf)):
+    try:
+        return InvitationService().decline(intent=request.intent, user=current.user)
+    except InvitationError as exc:
+        code = str(exc)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN if code == 'invitation_email_mismatch' else status.HTTP_404_NOT_FOUND, detail=code) from exc
