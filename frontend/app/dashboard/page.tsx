@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [memberships, setMemberships] = useState<IdentityBootstrap['memberships']>([])
   const [subscription, setSubscription] = useState<IdentityBootstrap['subscription']>(null)
   const [entitlements, setEntitlements] = useState<Record<string, boolean>>({})
+  const [onboarding, setOnboarding] = useState<IdentityBootstrap['onboarding']>(undefined)
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
@@ -31,6 +32,7 @@ export default function Dashboard() {
         setMemberships(identity?.memberships || [])
         setSubscription(identity?.subscription || null)
         setEntitlements(identity?.entitlements || {})
+        setOnboarding(identity?.onboarding)
         const activeFarmId = identity?.active_farm?.id || ''
         setFarmId(activeFarmId)
         if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
@@ -41,6 +43,7 @@ export default function Dashboard() {
         setMemberships([])
         setSubscription(null)
         setEntitlements({})
+        setOnboarding(undefined)
         setFarmId('')
       })
   }, [])
@@ -200,6 +203,12 @@ export default function Dashboard() {
         {farmId && error && (
           <Card hoverEffect={false} className="p-6 bg-white mb-10">
             <p className="text-sm text-red-700">{error}</p>
+          </Card>
+        )}
+
+        {isAuthenticated && onboarding && !onboarding.completed && (
+          <Card hoverEffect={false} className="mb-8 border border-amber-200 bg-amber-50 p-5">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="font-semibold text-stone-900">Kom i gang med Barebonde</p><p className="text-sm text-stone-700">{onboarding.completed_steps.length} av 7 steg registrert. Bankkonto er valgfri og blokkerer ikke bruk.</p></div><Button href="/onboarding" variant="outline">Fortsett</Button></div>
           </Card>
         )}
 
