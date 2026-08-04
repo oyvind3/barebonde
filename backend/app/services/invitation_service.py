@@ -8,6 +8,7 @@ from typing import Any
 from azure.cosmos import exceptions
 
 from app.core.security_tokens import hmac_identifier, new_opaque_token
+from app.core.config import settings
 from app.db.cosmos_client import get_farm_invitations_container
 from app.services.identity_service import IdentityService, normalize_email
 from app.services.membership_service import MembershipService, membership_id, utc_now
@@ -91,6 +92,11 @@ class InvitationService:
         invitation = self.get_invitation(farm_id=farm_id, invitation_id=invitation_id)
         if invitation.get("invitation_status") not in {"pending", "expired"}:
             raise InvitationConflictError("invitation_not_found")
+        last_sent = invitation.get("last_sent_at")
+        if last_sent:
+            sent_at = datetime.fromisoformat(str(last_sent).replace("Z", "+00:00"))
+            if (datetime.now(timezone.utc) - sent_at).total_seconds() < settings.invitation_resend_cooldown_seconds:
+                raise InvitationConflictError("invitation_resend_too_soon")
         secret = new_opaque_token()
         return invitation, secret
 

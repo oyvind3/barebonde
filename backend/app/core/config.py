@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     identity_magic_link_ttl_seconds: int = 60 * 15
     identity_cookie_name: str = "barebonde_session"
     identity_cookie_secure: Optional[bool] = None
+    invitation_ttl_seconds: int = 60 * 60 * 24 * 7
+    invitation_resend_cooldown_seconds: int = 60
     
     # API
     api_port: int = 8000

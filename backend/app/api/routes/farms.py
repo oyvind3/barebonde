@@ -501,6 +501,8 @@ async def resend_farm_invitation(farm_id: str, invitation_id: str, access: Autho
         invitation, token = service.prepare_resend(farm_id=farm_id, invitation_id=invitation_id)
         await _send_invitation_email(invitation=invitation, token=token, farm=access.farm, inviter=access.current.user)
         invitation = service.complete_resend(invitation, token)
+    except InvitationConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except InvitationError as exc:
         raise _not_found() from exc
     except Exception as exc:
