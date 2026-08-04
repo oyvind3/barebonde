@@ -183,6 +183,12 @@ class InvitationResponse(BaseModel):
     last_sent_at: Optional[str] = None
     send_count: int = 0
 
+class MemberRolePatch(BaseModel):
+    farm_role: str
+
+class MemberStatusPatch(BaseModel):
+    membership_status: str
+
 
 class BrregLookupResponse(BaseModel):
     org_number: str
@@ -523,6 +529,26 @@ def revoke_farm_invitation(
     except InvitationError as exc:
         raise _not_found() from exc
     _write_audit_event("FarmInvitationRevoked", farm_id, access.current.user["user_id"])
+
+@router.patch("/{farm_id}/members/{user_id}/role", response_model=FarmMemberResponse)
+def change_member_role(farm_id: str, user_id: str, request: MemberRolePatch, access: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_ROLE_UPDATE, require_csrf_protection=True))) -> FarmMemberResponse:
+    try: member = MembershipService().update_member_role(farm_id=farm_id, user_id=user_id, actor_user_id=str(access.current.user["user_id"]), role=request.farm_role)
+    except (MembershipNotFoundError, MembershipError) as exc: raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    _write_audit_event("FarmMemberRoleChanged", farm_id, access.current.user["user_id"])
+    return FarmMemberResponse(user_id=str(member["user_id"]), farm_role=member["farm_role"], membership_status=member["membership_status"], created_at=member.get("created_at"))
+
+@router.patch("/{farm_id}/members/{user_id}/status", response_model=FarmMemberResponse)
+def change_member_status(farm_id: str, user_id: str, request: MemberStatusPatch, access: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_STATUS_UPDATE, require_csrf_protection=True))) -> FarmMemberResponse:
+    try: member = MembershipService().update_member_status(farm_id=farm_id, user_id=user_id, actor_user_id=str(access.current.user["user_id"]), membership_status=request.membership_status)
+    except MembershipError as exc: raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    _write_audit_event("FarmMemberSuspended" if request.membership_status == "suspended" else "FarmMemberReactivated", farm_id, access.current.user["user_id"])
+    return FarmMemberResponse(user_id=str(member["user_id"]), farm_role=member["farm_role"], membership_status=member["membership_status"], created_at=member.get("created_at"))
+
+@router.delete("/{farm_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
+def remove_farm_member(farm_id: str, user_id: str, access: AuthorizedFarm = Depends(require_farm_permission(Permission.MEMBER_REMOVE, require_csrf_protection=True))) -> None:
+    try: MembershipService().remove_member(farm_id=farm_id, user_id=user_id, actor_user_id=str(access.current.user["user_id"]))
+    except MembershipError as exc: raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    _write_audit_event("FarmMemberRemoved", farm_id, access.current.user["user_id"])
 
 
 @router.patch("/{farm_id}", response_model=FarmResponse)

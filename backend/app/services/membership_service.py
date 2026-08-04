@@ -24,6 +24,10 @@ class InactiveMembershipError(MembershipError):
     pass
 
 
+class MembershipUpdateError(MembershipError):
+    pass
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -145,6 +149,49 @@ class MembershipService:
             )
         )
         return [self.normalize_membership(document) for document in documents]
+
+    def _target(self, *, farm_id: str, user_id: str, actor_user_id: str) -> dict[str, Any]:
+        member = self.get_membership(farm_id=farm_id, user_id=user_id)
+        if member is None:
+            raise MembershipNotFoundError("member_not_found")
+        if member.get("farm_role") == "owner":
+            raise MembershipUpdateError("cannot_modify_owner")
+        if user_id == actor_user_id:
+            raise MembershipUpdateError("cannot_modify_self")
+        return member
+
+    def _replace(self, member: dict[str, Any]) -> dict[str, Any]:
+        member["updated_at"] = utc_now(); member["version"] = int(member.get("version") or 1) + 1
+        try:
+            self.farm_users.replace_item(item=member["id"], body=member, etag=member.get("_etag"), match_condition="IfNotModified" if member.get("_etag") else None)
+        except exceptions.CosmosHttpResponseError as exc:
+            raise MembershipUpdateError("membership_update_conflict") from exc
+        return self.normalize_membership(member)
+
+    def update_member_role(self, *, farm_id: str, user_id: str, actor_user_id: str, role: str) -> dict[str, Any]:
+        if role not in {"manager", "staff"}: raise MembershipUpdateError("invalid_member_role")
+        member = self._target(farm_id=farm_id, user_id=user_id, actor_user_id=actor_user_id)
+        if not self.is_active(member): raise MembershipUpdateError("member_inactive")
+        if member["farm_role"] == role: return member
+        member.update({"farm_role": role, "role": role})
+        return self._replace(member)
+
+    def update_member_status(self, *, farm_id: str, user_id: str, actor_user_id: str, membership_status: str) -> dict[str, Any]:
+        if membership_status not in {"active", "suspended"}: raise MembershipUpdateError("invalid_membership_status_transition")
+        member = self._target(farm_id=farm_id, user_id=user_id, actor_user_id=actor_user_id)
+        if member.get("membership_status") == membership_status: return member
+        if membership_status == "suspended" and member.get("membership_status") != "active": raise MembershipUpdateError("invalid_membership_status_transition")
+        if membership_status == "active" and member.get("membership_status") != "suspended": raise MembershipUpdateError("invalid_membership_status_transition")
+        now = utc_now(); member["membership_status"] = membership_status
+        member.update({"suspended_at": now, "suspended_by_user_id": actor_user_id} if membership_status == "suspended" else {"reactivated_at": now, "reactivated_by_user_id": actor_user_id})
+        return self._replace(member)
+
+    def remove_member(self, *, farm_id: str, user_id: str, actor_user_id: str) -> dict[str, Any]:
+        member = self._target(farm_id=farm_id, user_id=user_id, actor_user_id=actor_user_id)
+        if member.get("membership_status") == "removed": return member
+        if member.get("membership_status") not in {"active", "suspended"}: raise MembershipUpdateError("member_inactive")
+        member.update({"membership_status": "removed", "previous_farm_role": member.get("farm_role"), "removed_at": utc_now(), "removed_by_user_id": actor_user_id})
+        return self._replace(member)
 
     def get_farm(self, farm_id: str) -> dict[str, Any] | None:
         farms = list(
