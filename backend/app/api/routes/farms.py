@@ -3,8 +3,9 @@ Farm management routes using Cosmos DB (Open Demo Mode)
 """
 
 from typing import Optional
+from uuid import uuid4
 from fastapi import APIRouter, HTTPException, status, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from azure.cosmos import exceptions
 import logging
 
@@ -15,6 +16,16 @@ from app.services.brreg_service import brreg_service
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+FARM_TYPES = {"plante", "husdyr", "skog", "blandet", "annet"}
+PRODUCTION_TYPES = {
+    "korn", "grovfor", "melk", "storfe", "sau_geit", "svin", "fjorkre_egg",
+    "frukt_baer", "gronnsaker_potet", "skogbruk", "annen_produksjon",
+}
+FARM_SIZE_RANGES = {"under_50", "50_199", "200_499", "500_plus", "vet_ikke"}
+TEAM_SIZES = {"1", "2_5", "6_10", "11_plus"}
+ONBOARDING_GOALS = {"regnskap", "bilag", "dokumenter", "frister", "maskiner", "areal", "driftsplan", "integrasjoner"}
+BILLING_METHODS = {"faktura", "vipps"}
+
 
 class FarmCreateRequest(BaseModel):
     """Request body for creating a farm"""
@@ -22,6 +33,52 @@ class FarmCreateRequest(BaseModel):
     org_number: str
     address: Optional[str] = None
     municipality: Optional[str] = None
+    manual_entry: bool = False
+    organization_form: Optional[str] = None
+    industry_code: Optional[str] = None
+    primary_farm_type: Optional[str] = None
+    production_types: list[str] = Field(default_factory=list)
+    farm_size_range: Optional[str] = None
+    team_size: Optional[str] = None
+    onboarding_goals: list[str] = Field(default_factory=list)
+    billing_method: Optional[str] = None
+    billing_email: Optional[EmailStr] = None
+
+    @field_validator("primary_farm_type")
+    @classmethod
+    def validate_primary_farm_type(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in FARM_TYPES:
+            raise ValueError("Ukjent driftsretning.")
+        return value
+
+    @field_validator("farm_size_range")
+    @classmethod
+    def validate_farm_size_range(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in FARM_SIZE_RANGES:
+            raise ValueError("Ukjent størrelsesintervall.")
+        return value
+
+    @field_validator("team_size")
+    @classmethod
+    def validate_team_size(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in TEAM_SIZES:
+            raise ValueError("Ukjent teamstørrelse.")
+        return value
+
+    @field_validator("billing_method")
+    @classmethod
+    def validate_billing_method(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in BILLING_METHODS:
+            raise ValueError("Ukjent betalingsmetode.")
+        return value
+
+    @field_validator("production_types", "onboarding_goals")
+    @classmethod
+    def validate_list_values(cls, value: list[str], info) -> list[str]:
+        allowed_values = PRODUCTION_TYPES if info.field_name == "production_types" else ONBOARDING_GOALS
+        if any(item not in allowed_values for item in value):
+            raise ValueError("Valget inneholder en ukjent onboardingverdi.")
+        return list(dict.fromkeys(value))
 
 
 class FarmResponse(BaseModel):
@@ -32,6 +89,15 @@ class FarmResponse(BaseModel):
     address: Optional[str]
     municipality: Optional[str]
     brreg_verified: bool = False
+    organization_form: str = ""
+    industry_code: str = ""
+    primary_farm_type: str = ""
+    production_types: list[str] = Field(default_factory=list)
+    farm_size_range: str = ""
+    team_size: str = ""
+    onboarding_goals: list[str] = Field(default_factory=list)
+    billing_method: str = ""
+    billing_email: str = ""
 
 
 class BrregLookupResponse(BaseModel):
@@ -106,10 +172,16 @@ async def create_farm(
     Create a new farm (Demo Mode)
     """
     farms_container = get_farms_container()
+    requested_org_number = request.org_number.strip()
+    is_manual_without_org_number = request.manual_entry and (
+        not requested_org_number.isdigit() or len(requested_org_number) != 9 or requested_org_number == "000000000"
+    )
+    org_number = f"manual-{uuid4()}" if is_manual_without_org_number else requested_org_number
     try:
-        query = f"SELECT * FROM farms f WHERE f.org_number = '{request.org_number}'"
+        query = "SELECT * FROM farms f WHERE f.org_number = @org_number"
         items = list(farms_container.query_items(
             query=query,
+            parameters=[{"name": "@org_number", "value": org_number}],
             enable_cross_partition_query=True
         ))
         
@@ -122,17 +194,18 @@ async def create_farm(
         logger.error(f"Error checking existing farm: {e}")
     
     brreg_data = None
-    try:
-        brreg_data = await brreg_service.lookup_org(request.org_number)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc)
-        ) from exc
-    except Exception as exc:
-        logger.warning(f"Skipping BRREG enrich due to transient error: {exc}")
+    if not is_manual_without_org_number:
+        try:
+            brreg_data = await brreg_service.lookup_org(org_number)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc)
+            ) from exc
+        except Exception as exc:
+            logger.warning(f"Skipping BRREG enrich due to transient error: {exc}")
 
-    if not brreg_data:
+    if not brreg_data and not request.manual_entry:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Organisasjonsnummeret finnes ikke i Brønnøysundregisteret"
@@ -141,11 +214,20 @@ async def create_farm(
     try:
         # Create farm
         farm = Farm(
-            name=request.name.strip() or brreg_data.get("name", ""),
-            org_number=request.org_number,
-            address=request.address or brreg_data.get("address", ""),
-            municipality=request.municipality or brreg_data.get("municipality", ""),
-            brreg_verified=True
+            name=request.name.strip() or (brreg_data or {}).get("name", ""),
+            org_number=org_number,
+            address=request.address or (brreg_data or {}).get("address", ""),
+            municipality=request.municipality or (brreg_data or {}).get("municipality", ""),
+            brreg_verified=bool(brreg_data),
+            organization_form=request.organization_form or (brreg_data or {}).get("organization_form", ""),
+            industry_code=request.industry_code or (brreg_data or {}).get("industry_code", ""),
+            primary_farm_type=request.primary_farm_type,
+            production_types=request.production_types,
+            farm_size_range=request.farm_size_range,
+            team_size=request.team_size,
+            onboarding_goals=request.onboarding_goals,
+            billing_method=request.billing_method,
+            billing_email=str(request.billing_email or ""),
         )
         
         # Save to Cosmos DB
@@ -168,7 +250,16 @@ async def create_farm(
             org_number=farm.org_number,
             address=farm.address,
             municipality=farm.municipality,
-            brreg_verified=farm.brreg_verified
+            brreg_verified=farm.brreg_verified,
+            organization_form=farm.organization_form,
+            industry_code=farm.industry_code,
+            primary_farm_type=farm.primary_farm_type,
+            production_types=farm.production_types,
+            farm_size_range=farm.farm_size_range,
+            team_size=farm.team_size,
+            onboarding_goals=farm.onboarding_goals,
+            billing_method=farm.billing_method,
+            billing_email=farm.billing_email,
         )
     
     except Exception as e:
@@ -195,7 +286,16 @@ async def get_farm(farm_id: str) -> FarmResponse:
             org_number=farm.org_number,
             address=farm.address,
             municipality=farm.municipality,
-            brreg_verified=farm.brreg_verified
+            brreg_verified=farm.brreg_verified,
+            organization_form=farm.organization_form,
+            industry_code=farm.industry_code,
+            primary_farm_type=farm.primary_farm_type,
+            production_types=farm.production_types,
+            farm_size_range=farm.farm_size_range,
+            team_size=farm.team_size,
+            onboarding_goals=farm.onboarding_goals,
+            billing_method=farm.billing_method,
+            billing_email=farm.billing_email,
         )
     except exceptions.CosmosResourceNotFoundError:
         raise HTTPException(

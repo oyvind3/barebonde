@@ -1,26 +1,26 @@
-# Barebonde - Project README
+# Barebonde
 
-Regnskaps- og administrasjonsplattform for norske bønder og små landbruksvirksomheter.
+Barebonde er en modulær plattform for norske gårdsbruk og landbruksforetak. Løsningen utvikles rundt gårdsoversikt, regnskap og bilag, dokumenter, frister, ressurser og drift.
 
-## 🎯 Vision
+## Dagens løsning
 
-Én digital løsning for alt: Regnskap, avtaler, dokumenter, frister, og kommunikasjon med offentlige tjenester.
+- `frontend/`: Next.js 14 med TypeScript og statisk eksport til Azure Static Web Apps.
+- `backend/`: FastAPI pakket som én Azure Functions `AsgiFunctionApp` i `function_app.py`.
+- Data: Azure Cosmos DB (NoSQL) for domeneobjekter og Azure Blob Storage for dokumenter.
+- Integrasjoner: BRREG-oppslag, Plunk for transaksjonell e-post og Google Identity Services i dagens onboarding.
+- Leveranse: eksisterende GitHub Actions-workflows bygger og publiserer frontend og Function App.
 
-Målet er å gi bønder tilbake tiden til det de er gode på — å drive gården — og bort fra skrivebord og papirer.
+Cloudflare- og Azure-konfigurasjon håndteres manuelt i MVP-en. Det er ikke planlagt IaC i denne fasen.
 
-## 🌱 Status
+## Sikkerhetsstatus
 
-**Phase 1: Foundation** — Under implementasjon
+Dagens Google- og e-postflyt er en overgangsløsning og er **ikke produksjonsklar autentisering eller autorisering**. Den må ikke behandles som sikker identitets-, abonnements- eller rettighetskilde, og klientlagring er ikke en erstatning for serverstyrte sesjoner.
 
-- ✅ Produktarkitektur definert
-- ✅ Teknisk stack valgt
-- ✅ Prosjektstruktur opprettet
-- 🟡 Authentication (ID-porten) — under arbeid
-- ⚪ Regnskap — neste
+Før videre Identity-arbeid skal eksisterende Cosmos-containere valideres med et eksplisitt bootstrap-steg. Deretter er den planlagte retningen serverstyrte sesjoner i Cosmos, `HttpOnly`-cookie, CSRF-beskyttelse og en autoritativ `FarmUser`-medlemskapsmodell. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
 
-## 🚀 Quick Start
+Et eventuelt tidligere Ory-prosjekt må slettes eller deaktiveres manuelt i Ory-konsollen; repositoryet kan ikke gjøre dette.
 
-See [IMPLEMENTATION.md](./IMPLEMENTATION.md) for detailed setup guide.
+## Lokal utvikling
 
 ```bash
 # Backend
@@ -28,141 +28,53 @@ cd backend
 python -m venv venv
 venv\Scripts\activate  # Windows
 pip install -r requirements.txt
+copy local.settings.example.json local.settings.json
 python -m uvicorn main:app --reload
 
 # Frontend
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-Backend: http://localhost:8000  
-Frontend: http://localhost:3000
+Fyll kun lokale verdier i `backend/local.settings.json`; filen er ignorert av Git. Se `backend/.env.example` for miljøvariabler. Testene bruker mocks og skal ikke koble til Azure-ressurser.
 
-## 📋 Architecture
+## Kvalitetskontroller
 
-### Stack
-- **Backend:** Python + FastAPI
-- **Frontend:** Next.js (React + TypeScript)
-- **Database:** PostgreSQL
-- **Hosting:** Azure (Nord-Europa)
-- **Auth:** ID-porten + JWT
+```bash
+# Backend
+cd backend
+python -m pytest
 
-### Domain Model
-
-```
-Farm (Gård)
-├─ Organization (AS/ENK via BRREG)
-├─ Users (multi-tenant, role-based)
-├─ Transactions (Income/Expense)
-├─ Documents (Contracts, Invoices, Permits)
-├─ Deadlines (Tax, Agricultural, Legal)
-└─ Properties (Eiendom via Gårdskart)
+# Frontend
+cd frontend
+npm run lint
+npx tsc --noEmit
+npm run build
 ```
 
-## 📁 Project Structure
+## Repositorystuktur
 
-```
-barebonde/
-├── backend/                 # FastAPI application
-│   ├── app/
-│   │   ├── api/            # API routes
-│   │   ├── db/             # Database models
-│   │   ├── services/       # Business logic
-│   │   ├── schemas/        # Pydantic models
-│   │   └── core/           # Config, security
-│   ├── tests/              # Unit tests
-│   ├── main.py             # App entry
-│   └── requirements.txt
-│
-├── frontend/                # Next.js application
-│   ├── app/                 # Pages & routes
-│   ├── components/          # Reusable components
-│   ├── styles/              # Global styles
-│   └── package.json
-│
-├── docs/
-│   ├── architecture/        # ADRs, diagrams
-│   ├── database/            # Schema, migrations
-│   ├── product-vision.md    # Product strategy
-│   ├── inspiration.md       # Reference solutions
-│   └── IMPLEMENTATION.md    # Setup guide
-│
-└── backlog/
-    └── epics.md             # Feature backlog
+```text
+backend/                 FastAPI og Azure Functions
+  app/api/routes/        Health-, auth-, gårds- og regnskapsruter
+  app/db/                Cosmos-klient og dokumentmodeller
+  app/services/          BRREG, Blob Storage, OCR og regnskapskatalog
+  tests/                 Isolerte backend-tester
+frontend/                Next.js-applikasjon
+backlog/                 Produktbacklog
+docs/architecture/       Arkitekturbeslutninger
+.github/workflows/       Bygg og deploy
 ```
 
-## 🔐 Security
+## Dokumentasjon
 
-- **Authentication:** OAuth2 with Norwegian ID-porten
-- **Authorization:** JWT tokens + role-based access
-- **Data:** Row-level isolation per farm
-- **Audit:** All sensitive operations logged
-- **TLS:** HTTPS required in production
+- [Arkitekturbeslutninger](./docs/architecture/adr.md)
+- [Produktbacklog](./backlog/epics.md)
+- [Google-oppsett](./docs/GOOGLE_OAUTH_SETUP.md)
+- [Statusrapport](./STATUS_REPORT.md)
+- [Sjekkliste](./CHECKLIST.md)
 
-## 📈 Phases
+## Neste planlagte fase
 
-| Phase | Timeline | Focus | Status |
-|-------|----------|-------|--------|
-| **Phase 1** | Weeks 1-2 | Auth + Multi-tenant | 🟡 In Progress |
-| **Phase 2** | Weeks 3-8 | Regnskap + Dokumenter + Frister | ⚪ To Do |
-| **Phase 3** | Weeks 9-10 | Peppol + eSignering + Offentlige APIer | ⚪ To Do |
-| **Phase 4** | Weeks 11-12 | Maskin + Planlegging (post-MVP) | ⚪ To Do |
-
-## 🎯 MVP Scope
-
-**Included:**
-- User authentication via ID-porten
-- Farm setup and multi-user management
-- Income/Expense tracking
-- Document upload and versioning
-- Contract management with eSignering
-- Deadline tracking and notifications
-
-**Not in MVP:**
-- Complex accounting features
-- Offline functionality
-- Mobile apps
-- Advanced reporting
-
-## 📚 Documentation
-
-- [Architecture Decision Records](./docs/architecture/adr.md)
-- [Database Schema](./docs/database/schema.sql)
-- [Product Vision](./docs/product-vision.md)
-- [Implementation Guide](./docs/IMPLEMENTATION.md)
-- [API Documentation](http://localhost:8000/docs) (when running)
-
-## 🔗 Integrations (Roadmap)
-
-1. **ID-porten** — Authentication ✅ In Phase 1
-2. **BRREG** — Organization data — Phase 1
-3. **eSignering** — Digital signatures — Phase 2
-4. **Peppol/ELMA** — E-invoices — Phase 3
-5. **Gårdskart** — Property mapping — Phase 2
-6. **Offentlige registre** — Tax, subsidies, permits — Phase 3
-
-## 👥 Contributing
-
-Team: Solo/1-2 developers  
-Timeline: 3 months to MVP
-
-## ⚠️ Known Issues
-
-- [ ] ID-porten integration needs real credentials
-- [ ] Multi-tenant middleware not yet implemented
-- [ ] Frontend token storage (localStorage) should be httpOnly cookies
-- [ ] No rate limiting on auth endpoints
-
-## 📞 Support
-
-Contact: Not yet - team internal project
-
-## 📄 License
-
-Proprietary - Barebonde ASA
-
----
-
-**Last Updated:** July 30, 2026  
-**Next Review:** After Phase 1 complete
+`Eksplisitt Cosmos bootstrap og validering av eksisterende containere`.

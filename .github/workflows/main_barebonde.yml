@@ -39,12 +39,17 @@ jobs:
         run: |
           cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           COSMOS_DB_CONNECTION_STRING="AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjfC0A9T8CWAQY3R7v0dQ==;" \
-          BETTER_AUTH_API_KEY=test \
           JWT_SECRET_KEY=test \
           PYTHONPATH=".python_packages/lib/site-packages" \
           python -c "import function_app"
 
-      # Optional: Add step to run tests here
+      - name: Run backend tests
+        run: |
+          cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          COSMOS_DB_CONNECTION_STRING="not-used-in-unit-tests" \
+          JWT_SECRET_KEY=test \
+          PYTHONPATH=".python_packages/lib/site-packages" \
+          python -m pytest -q
 
       - name: Zip artifact for deployment
         run: |

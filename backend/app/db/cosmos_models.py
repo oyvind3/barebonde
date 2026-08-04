@@ -26,16 +26,24 @@ class User:
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
         google_id: Optional[str] = None,
+        phone_number: Optional[str] = None,
+        phone_verified: bool = False,
+        address: Optional[str] = None,
+        onboarding_role: Optional[str] = None,
         is_active: bool = True,
         id: Optional[str] = None,
         created_at: Optional[datetime] = None
     ):
         self.id = id or str(uuid.uuid4())
         self.email = email
-        self.better_auth_id = better_auth_id  # Partition key
+        self.better_auth_id = better_auth_id  # Existing Cosmos partition key; retained for document compatibility.
         self.first_name = first_name
         self.last_name = last_name
         self.google_id = google_id
+        self.phone_number = phone_number
+        self.phone_verified = phone_verified
+        self.address = address
+        self.onboarding_role = onboarding_role
         self.is_active = is_active
         self.created_at = created_at or datetime.utcnow()
         self.type = "user"  # Document type discriminator
@@ -50,6 +58,10 @@ class User:
             "first_name": self.first_name,
             "last_name": self.last_name,
             "google_id": self.google_id,
+            "phone_number": self.phone_number,
+            "phone_verified": self.phone_verified,
+            "address": self.address,
+            "onboarding_role": self.onboarding_role,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
         }
@@ -64,6 +76,10 @@ class User:
             first_name=data.get("first_name"),
             last_name=data.get("last_name"),
             google_id=data.get("google_id"),
+            phone_number=data.get("phone_number"),
+            phone_verified=data.get("phone_verified", False),
+            address=data.get("address"),
+            onboarding_role=data.get("onboarding_role"),
             is_active=data.get("is_active", True),
             created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None
         )
@@ -79,6 +95,15 @@ class Farm:
         address: Optional[str] = None,
         municipality: Optional[str] = None,
         brreg_verified: bool = False,
+        organization_form: Optional[str] = None,
+        industry_code: Optional[str] = None,
+        primary_farm_type: Optional[str] = None,
+        production_types: Optional[List[str]] = None,
+        farm_size_range: Optional[str] = None,
+        team_size: Optional[str] = None,
+        onboarding_goals: Optional[List[str]] = None,
+        billing_method: Optional[str] = None,
+        billing_email: Optional[str] = None,
         id: Optional[str] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None
@@ -89,6 +114,15 @@ class Farm:
         self.address = address or ""
         self.municipality = municipality or ""
         self.brreg_verified = brreg_verified
+        self.organization_form = organization_form or ""
+        self.industry_code = industry_code or ""
+        self.primary_farm_type = primary_farm_type or ""
+        self.production_types = production_types or []
+        self.farm_size_range = farm_size_range or ""
+        self.team_size = team_size or ""
+        self.onboarding_goals = onboarding_goals or []
+        self.billing_method = billing_method or ""
+        self.billing_email = billing_email or ""
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
         self.type = "farm"  # Document type discriminator
@@ -103,6 +137,15 @@ class Farm:
             "address": self.address,
             "municipality": self.municipality,
             "brreg_verified": self.brreg_verified,
+            "organization_form": self.organization_form,
+            "industry_code": self.industry_code,
+            "primary_farm_type": self.primary_farm_type,
+            "production_types": self.production_types,
+            "farm_size_range": self.farm_size_range,
+            "team_size": self.team_size,
+            "onboarding_goals": self.onboarding_goals,
+            "billing_method": self.billing_method,
+            "billing_email": self.billing_email,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
         }
@@ -117,6 +160,15 @@ class Farm:
             address=data.get("address"),
             municipality=data.get("municipality"),
             brreg_verified=data.get("brreg_verified", False),
+            organization_form=data.get("organization_form"),
+            industry_code=data.get("industry_code"),
+            primary_farm_type=data.get("primary_farm_type"),
+            production_types=data.get("production_types"),
+            farm_size_range=data.get("farm_size_range"),
+            team_size=data.get("team_size"),
+            onboarding_goals=data.get("onboarding_goals"),
+            billing_method=data.get("billing_method"),
+            billing_email=data.get("billing_email"),
             created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None,
             updated_at=datetime.fromisoformat(data.get("updated_at")) if data.get("updated_at") else None
         )

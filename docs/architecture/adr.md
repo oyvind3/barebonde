@@ -1,156 +1,37 @@
-# Barebonde - Architecture Decision Log
+# Barebonde – arkitekturbeslutninger
 
-## ADL-001: Technology Stack
+## ADL-001: Plattform og deploymodell
 
-**Status:** DECIDED
+**Status:** Besluttet
 
-**Decision:**
-- Backend: Python + FastAPI
-- Frontend: Next.js (React + TypeScript)
-- Database: PostgreSQL
-- Hosting: Azure (Nord-Europa region)
-- Authentication: ID-porten OAuth2 → JWT tokens
+Barebonde bruker Next.js 14 med statisk eksport på Azure Static Web Apps og FastAPI i én Python Azure Functions v4 `AsgiFunctionApp`. Eksisterende GitHub Actions beholdes. Azure- og Cloudflare-konfigurasjon håndteres manuelt i MVP-en; det er ikke planlagt IaC nå.
 
-**Rationale:**
-- **FastAPI**: Fast async Python, great for numerical/accounting workloads, excellent ORM support
-- **Next.js**: Fullstack React framework, excellent for modern UX + API integration
-- **PostgreSQL**: ACID compliance (critical for accounting), good JSON support, proven track record
-- **Azure**: Microsoft ecosystem, Norwegian data center, GDPR compliant
-- **JWT**: Stateless auth, scales well, works with mobile apps later
+## ADL-002: Datamodell og tenancy
 
-**Trade-offs:**
-- Python backend requires async programming discipline
-- Next.js adds some complexity but provides full-stack flexibility
-- PostgreSQL is more complex than NoSQL but necessary for accounting
+**Status:** Delvis implementert
 
----
+Azure Cosmos DB er dokumentdatabasen. Gårdsobjekter, brukerprofiler og gårdstilknytninger lagres som dokumenter, og Azure Blob Storage lagrer dokumentfiler. `Farm` er den framtidige tenanten. `FarmUser` finnes som dokumentmodell, men er ennå ikke autoritativ medlemskaps- eller autoriseringskontroll.
 
-## ADL-002: Multi-tenant Architecture
+## ADL-003: Identity og autorisering
 
-**Status:** DECIDED
+**Status:** Planlagt, ikke implementert
 
-**Decision:**
-- Single database, row-level isolation per farm
-- JWT tokens include `farm_id` to enforce isolation
-- Audit logs for all sensitive operations
+Den nåværende Google- og e-postflyten er overgangsfunksjonalitet og ikke produksjonsklar autentisering. Neste sikkerhetsfase skal etablere serverstyrte sesjoner i Cosmos, `HttpOnly`-cookies, CSRF-beskyttelse og sentrale autoriseringsbeslutninger basert på `FarmUser`.
 
-**Rationale:**
-- Cheaper infrastructure than per-tenant databases
-- Simpler deployment and management
-- Risk: One SQL injection bug could expose all farms
+Ory/Kratos, Better Auth, SQLAlchemy, PostgreSQL og ID-porten er ikke del av målarkitekturen.
 
-**Mitigation:**
-- SQLAlchemy ORM (parameterized queries)
-- Input validation at API layer
-- Regular security audits
+## ADL-004: Regnskap og dokumenter
 
----
+**Status:** Delvis implementert
 
-## ADL-003: Authentication Flow
+Regnskap og bilag er én modul, ikke hele produktet. Bilagsmetadata lagres i Cosmos, mens dokumentinnhold lagres i Azure Blob Storage. OCR og BRREG holdes som integrasjoner i samme Function App.
 
-**Status:** DECIDED
+## ADL-005: Videre modularisering
 
-**Decision:**
-1. Frontend → ID-porten OAuth2 endpoint
-2. User logs in with Norwegian ID
-3. ID-porten → callback with auth code
-4. Backend exchanges code for ID-porten token
-5. Backend creates JWT access token + refresh token
-6. Frontend stores tokens in localStorage (or httpOnly cookies phase 2)
+**Status:** Planlagt
 
-**Rationale:**
-- ID-porten is Norwegian standard (legal requirement)
-- JWT allows stateless backend scaling
-- Refresh tokens allow long-term access without re-auth
+Identity, organisasjoner, abonnement, entitlements og autorisering skal organiseres som moduler i den eksisterende Function App. De er ikke egne mikroservicer i MVP-en, men skal kunne skilles ut dersom drift eller skala senere krever det.
 
-**Security considerations:**
-- httpOnly cookies phase 2 (prevent XSS)
-- PKCE flow phase 2 (prevent CSRF)
-- Token revocation on logout
+## Neste arkitekturarbeid
 
----
-
-## ADL-004: Accounting Data Model
-
-**Status:** DECIDED
-
-**Design:**
-- Simple transaction model (Income/Expense)
-- Category-based classification
-- No double-entry bookkeeping in MVP (simplify UX)
-- Audit trail for all transactions
-
-**Future:**
-- Phase 3: Move to proper double-entry when complexity requires
-
-**Rationale:**
-- MVP simplicity over accounting purity
-- Bønder are not accountants - overcomplicating loses them
-- Can migrate to NNRF (Norwegian chart of accounts) later
-
----
-
-## ADL-005: Document Storage
-
-**Status:** DECIDED
-
-**Decision:**
-- Store PDFs/documents in Azure Blob Storage
-- Database stores reference + metadata
-- No file versioning in MVP
-
-**Rationale:**
-- Avoids database bloat
-- Azure integrated
-- Cheaper than database storage
-
-**Phase 2:** Add version control
-
----
-
-## ADL-006: Integrations Strategy
-
-**Status:** DECIDED
-
-**Priority order:**
-1. ID-porten (auth) - MVP blocker
-2. BRREG (org lookup) - UX quality
-3. eSignering (contracts) - core feature
-4. Peppol/ELMA (invoices) - revenue driver
-5. Gårdskart (property mapping) - nice-to-have
-
-**Rationale:**
-- Start with highest value / lowest complexity
-- Peppol is complex but enables 80/20 value
-
----
-
-## ADL-007: MVP Scope - What's NOT included
-
-**Status:** DECIDED
-
-**Phase 1 exclusions:**
-- ❌ Multi-currency
-- ❌ Multiple fiscal years
-- ❌ Anleggsmidler (depreciation)
-- ❌ Complex permissions (3 roles only)
-- ❌ Offline functionality
-- ❌ Mobile app
-
-**Rationale:**
-- 3-month MVP timeline requires ruthless focus
-- 80/20 - these features add 20% value but 80% complexity
-
----
-
-## Implementation Checklist
-
-- [ ] PostgreSQL schema created
-- [ ] Backend FastAPI structure verified
-- [ ] ID-porten OAuth2 integration (placeholder)
-- [ ] JWT token generation/verification
-- [ ] Next.js frontend setup
-- [ ] Login flow end-to-end
-- [ ] Database migrations (Alembic)
-- [ ] Unit tests for auth service
-- [ ] Documentation for deployment
+Før Identity implementeres: `Eksplisitt Cosmos bootstrap og validering av eksisterende containere`.

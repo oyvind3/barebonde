@@ -8,6 +8,8 @@ env/
 venv/
 ENV/
 build/
+.python_packages/
+release.zip
 develop-eggs/
 dist/
 downloads/
@@ -34,6 +36,7 @@ wheels/
 .env
 .env.local
 .env.*.local
+local.settings.json
 
 # Testing
 .pytest_cache/

@@ -1,0 +1,18 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "FUNCTIONS_EXTENSION_VERSION": "~4",
+    "COSMOS_DB_CONNECTION_STRING": "AccountEndpoint=https://your-account.documents.azure.com:443/;AccountKey=REPLACE_WITH_LOCAL_VALUE;",
+    "COSMOS_DB_DATABASE_ID": "barebonde",
+    "PLUNK_SECRET_API_KEY": "sk_replace_with_local_secret_key",
+    "PLUNK_PUBLIC_API_KEY": "pk_replace_with_local_public_key",
+    "JWT_SECRET_KEY": "replace_with_a_long_random_local_secret",
+    "JWT_ALGORITHM": "HS256",
+    "API_PORT": "8000",
+    "API_HOST": "0.0.0.0",
+    "ENV": "development",
+    "FRONTEND_URL": "http://localhost:3000"
+  }
+}

@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import { API_BASE_URL } from '@/lib/api'
 
 export type GoogleUser = {
-  user_id: string
+  user_id?: string
+  google_id?: string
   email: string
   first_name: string
   last_name: string
   picture?: string | null
   message: string
+  credential?: string
 }
 
 interface GoogleCredentialResponse {
@@ -23,6 +25,7 @@ interface GoogleLoginButtonProps {
   disabled?: boolean
   className?: string
   redirectTo?: string | null
+  deferPersistence?: boolean
 }
 
 declare global {
@@ -37,6 +40,7 @@ export function GoogleLoginButton({
   disabled = false,
   className = '',
   redirectTo = '/dashboard',
+  deferPersistence = false,
 }: GoogleLoginButtonProps) {
   const router = useRouter()
   const googleButtonRef = useRef<HTMLDivElement>(null)
@@ -45,6 +49,7 @@ export function GoogleLoginButton({
   const [clientId, setClientId] = useState(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [buttonWidth, setButtonWidth] = useState(320)
 
   useEffect(() => {
     onSuccessRef.current = onSuccess
@@ -84,20 +89,27 @@ export function GoogleLoginButton({
         throw new Error('Ingen token mottatt fra Google.')
       }
 
-      const backendResponse = await fetch(`${API_BASE_URL}/api/auth/google`, {
+      const backendResponse = await fetch(
+        `${API_BASE_URL}/api/auth/${deferPersistence ? 'google/verify' : 'google'}`,
+        {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: response.credential }),
-      })
+        },
+      )
       const userData = await backendResponse.json().catch(() => ({}))
       if (!backendResponse.ok) {
         throw new Error(userData.detail || 'Google-autentisering feilet på serveren.')
       }
 
-      const user = userData as GoogleUser
-      window.localStorage.setItem('user', JSON.stringify(user))
+      const user: GoogleUser = deferPersistence
+        ? { ...userData, credential: response.credential, message: 'Google-identiteten er verifisert.' }
+        : userData as GoogleUser
+      if (!deferPersistence) {
+        window.localStorage.setItem('user', JSON.stringify(user))
+      }
       onSuccessRef.current?.(user)
-      if (redirectTo) router.push(redirectTo)
+      if (!deferPersistence && redirectTo) router.push(redirectTo)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Google-autentisering feilet.'
       setError(message)
@@ -105,7 +117,7 @@ export function GoogleLoginButton({
     } finally {
       setLoading(false)
     }
-  }, [redirectTo, router])
+  }, [deferPersistence, redirectTo, router])
 
   const initializeGoogleButton = useCallback(() => {
     if (!window.google || !googleButtonRef.current || !clientId) return
@@ -123,9 +135,24 @@ export function GoogleLoginButton({
       text: 'signin_with',
       size: 'large',
       logo_alignment: 'left',
-      width: '100%',
+      width: buttonWidth,
     })
-  }, [clientId, handleCredentialResponse])
+  }, [buttonWidth, clientId, handleCredentialResponse])
+
+  useEffect(() => {
+    const element = googleButtonRef.current
+    if (!element) return
+
+    const updateWidth = () => {
+      const nextWidth = Math.max(200, Math.min(400, Math.floor(element.clientWidth || 320)))
+      setButtonWidth((currentWidth) => currentWidth === nextWidth ? currentWidth : nextWidth)
+    }
+
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (!clientId) return
@@ -165,7 +192,7 @@ export function GoogleLoginButton({
       <div className={disabled ? 'pointer-events-none opacity-50' : ''}>
         <div
           ref={googleButtonRef}
-          className="flex justify-center"
+          className="flex w-full justify-center"
           style={{ minHeight: '40px', display: 'flex', alignItems: 'center' }}
         />
       </div>

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     plunk_secret_api_key: str = ""
     plunk_public_api_key: str = ""
     
-    # JWT (still used for API tokens if needed, but better-auth handles sessions)
+    # Retained for the current API surface; server-managed sessions are planned.
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     
