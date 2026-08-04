@@ -14,15 +14,15 @@
 
 ## Produktstatus
 
-BRREG-oppslag, gårdsoppsett, bilag/OCR og Plunk-integrasjon finnes i repositoryet. Identity-MVP-en har Google Identity Services, e-postbasert engangsinnlogging, Cosmos-baserte ugjennomsiktige sesjoner, `HttpOnly`-cookie, CSRF, logout, sesjonsoversikt og `/api/me` med bare bruker og sesjon. `IDENTITY_HMAC_KEY` må konfigureres separat før rutene kan brukes i et miljø.
+BRREG-oppslag, gårdsoppsett, bilag/OCR og Plunk-integrasjon finnes i repositoryet. Identity-MVP-en har Google Identity Services, e-postbasert engangsinnlogging, Cosmos-baserte ugjennomsiktige sesjoner, `HttpOnly`-cookie, CSRF, logout og sesjonsoversikt. `FarmUser` er nå den autoritative medlemskapsmodellen: `GET /api/me` returnerer aktive medlemskap og en validert aktiv Farm, og Farm-rutene kontrollerer medlemskap og rolle server-side. `IDENTITY_HMAC_KEY` må konfigureres separat før rutene kan brukes i et miljø.
 
-Det finnes fortsatt ikke autoritativt medlemskap, tenant-kontroll eller sentral permission-kontroll. Farm- og abonnementsdata er derfor bevisst utelatt fra `/api/me`.
+Rollene `owner`, `manager` og `staff` bruker en sentral, statisk permission-katalog. Opprettelse, lesing, endring og medlemsliste for Farm er tenant-isolert. Abonnement, entitlements og usage er fortsatt ikke implementert. Regnskaps-, bilags-, dokument- og Blob-rutene er ikke ennå dekket av Farm-autorisasjonen og må ikke oppfattes som tenant-sikre.
 
 Cosmos DB er den faktiske datalagringen. SQLAlchemy, PostgreSQL, Better Auth, ID-porten og Ory/Kratos er ikke aktive deler av dagens arkitektur.
 
 ## Neste arbeid
 
-1. FarmUser-medlemskap og sentral tenant-autorisering.
+1. Tenant-sikring av bilag, dokumenter, bokføring, rapporter og Blob-tilgang.
 2. Abonnement og statiske entitlements per gård.
 3. Rate limiting og sikkerhetsgjennomgang av Identity før bred produksjonsbruk.
 

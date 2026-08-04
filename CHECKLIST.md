@@ -13,9 +13,11 @@
 ## Ikke produksjonsklart ennå
 
 - [x] Serverstyrte Cosmos-sesjoner med `HttpOnly`-cookie, logout og tilbakekalling.
-- [x] CSRF-beskyttelse og `/api/me` med avgrenset bruker-/sesjonsrespons.
-- [ ] Autoritativ `FarmUser`-medlemskapsmodell og permissions.
+- [x] CSRF-beskyttelse og `/api/me` med bruker, sesjon og CSRF-token.
+- [x] Autoritativ `FarmUser`-medlemskapsmodell, roller og sentrale permissions for Farm-ruter.
+- [x] Tenant-isolerte Farm-ruter og servervalidert aktiv Farm i `/api/me`.
 - [ ] Abonnement, entitlements og usage per gård.
+- [ ] Tenant-sikring av bilag, dokumenter, bokføring, rapporter og Blob-tilgang.
 - [ ] Rate limiting, sikkerhetsgjennomgang og penetrasjonstest.
 
 Google- og e-postflyten er Identity-MVP, ikke en abonnementskilde. Ikke legg identitet eller rettigheter i `localStorage`; `IDENTITY_HMAC_KEY` må være satt før Identity-rutene aktiveres.

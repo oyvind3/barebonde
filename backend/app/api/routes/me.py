@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies.identity import CurrentIdentity, get_current_identity
-from app.api.identity_models import IdentityUserResponse, MeResponse, SessionResponse
+from app.api.identity_models import (
+    CsrfResponse,
+    FarmSnapshotResponse,
+    IdentityUserResponse,
+    MembershipResponse,
+    MeResponse,
+    SessionResponse,
+)
+from app.services.membership_service import MembershipService
 from app.services.session_service import SessionService
 
 router = APIRouter()
@@ -33,15 +43,53 @@ def session_response(session: dict, *, current: bool = True) -> SessionResponse:
     )
 
 
-@router.get("/me", response_model=MeResponse)
-def get_me(current: CurrentIdentity = Depends(get_current_identity)) -> MeResponse:
-    """Return only the authenticated user and current session.
+def _membership_response(membership: dict, service: MembershipService) -> MembershipResponse | None:
+    snapshot = {
+        "id": membership.get("farm_id"),
+        "name": membership.get("farm_name"),
+        "org_number": membership.get("org_number"),
+        "farm_status": membership.get("farm_status", "active"),
+    }
+    if not snapshot["name"] or not snapshot["org_number"]:
+        farm = service.get_farm(str(membership["farm_id"]))
+        if farm is None:
+            return None
+        snapshot = {
+            "id": farm["id"],
+            "name": farm.get("name") or "",
+            "org_number": farm.get("org_number") or "",
+            "farm_status": farm.get("farm_status", "active"),
+        }
+    return MembershipResponse(
+        farm=FarmSnapshotResponse(**snapshot),
+        farm_role=str(membership["farm_role"]),
+        membership_status=str(membership["membership_status"]),
+    )
 
-    Farms, roles, subscriptions and permissions are deliberately not added
-    until their bounded contexts are implemented.
-    """
+
+@router.get("/me", response_model=MeResponse)
+def get_me(
+    active_farm_id: Optional[str] = Query(default=None),
+    current: CurrentIdentity = Depends(get_current_identity),
+) -> MeResponse:
+    """Return the session principal plus active, authoritative Farm memberships."""
+    membership_service = MembershipService()
+    memberships = [
+        response
+        for membership in membership_service.list_active_memberships_for_user(current.user["user_id"])
+        if (response := _membership_response(membership, membership_service)) is not None
+    ]
+    active_farm = next((item.farm for item in memberships if item.farm.id == active_farm_id), None)
+    if active_farm is None and memberships:
+        active_farm = memberships[0].farm
+    csrf_token = SessionService().csrf_token(current.raw_session_token)
     return MeResponse(
         user=user_response(current.user),
         session=session_response(current.session),
-        csrf_token=SessionService().csrf_token(current.raw_session_token),
+        csrf_token=csrf_token,
+        csrf=CsrfResponse(token=csrf_token, expires_at=str(current.session["expires_at"])),
+        memberships=memberships,
+        active_farm=active_farm,
+        subscription=None,
+        entitlements={},
     )

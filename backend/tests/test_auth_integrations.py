@@ -222,15 +222,63 @@ def test_me_is_limited_to_identity_and_session_data(monkeypatch):
         def csrf_token(self, _raw_token):
             return "csrf-public-value"
 
+    class FakeMembershipService:
+        def list_active_memberships_for_user(self, _user_id):
+            return []
+
     monkeypatch.setattr(identity_dependency, "SessionService", FakeSessionService)
     monkeypatch.setattr(me, "SessionService", FakeSessionService)
+    monkeypatch.setattr(me, "MembershipService", FakeMembershipService)
 
     response = make_client(include_me=True).get("/me", cookies={"barebonde_session": "browser-cookie"})
 
     assert response.status_code == 200
-    assert set(response.json()) == {"user", "session", "csrf_token"}
-    assert "farm" not in response.text.lower()
-    assert "subscription" not in response.text.lower()
+    assert response.json()["memberships"] == []
+    assert response.json()["active_farm"] is None
+    assert response.json()["subscription"] is None
+    assert response.json()["entitlements"] == {}
+
+
+def test_me_returns_only_active_memberships_and_validates_active_farm_preference(monkeypatch):
+    class FakeSessionService:
+        def get_session(self, _raw_token):
+            return session_document(), user_document()
+
+        def csrf_token(self, _raw_token):
+            return "csrf-public-value"
+
+    class FakeMembershipService:
+        def list_active_memberships_for_user(self, user_id):
+            assert user_id == "internal-user-id"
+            return [
+                {
+                    "farm_id": "farm-a",
+                    "farm_name": "Alfa gård",
+                    "org_number": "111111111",
+                    "farm_role": "owner",
+                    "membership_status": "active",
+                },
+                {
+                    "farm_id": "farm-b",
+                    "farm_name": "Beta gård",
+                    "org_number": "222222222",
+                    "farm_role": "staff",
+                    "membership_status": "active",
+                },
+            ]
+
+    monkeypatch.setattr(identity_dependency, "SessionService", FakeSessionService)
+    monkeypatch.setattr(me, "SessionService", FakeSessionService)
+    monkeypatch.setattr(me, "MembershipService", FakeMembershipService)
+    client = make_client(include_me=True)
+    cookies = {"barebonde_session": "browser-cookie"}
+
+    selected = client.get("/me?active_farm_id=farm-b", cookies=cookies)
+    invalid = client.get("/me?active_farm_id=farm-not-a-member", cookies=cookies)
+
+    assert [item["farm"]["id"] for item in selected.json()["memberships"]] == ["farm-a", "farm-b"]
+    assert selected.json()["active_farm"]["id"] == "farm-b"
+    assert invalid.json()["active_farm"]["id"] == "farm-a"
 
 
 def test_logout_requires_csrf_and_revokes_only_current_session(monkeypatch):

@@ -1,14 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import axios from 'axios'
 import { Navbar } from '@/components/navigation/Navbar'
 import { GoogleLoginButton, GoogleUser } from '@/components/auth/GoogleLoginButton'
 import { Button } from '@/components/ui/Button'
 import { Company, CompanySearch } from '@/components/ui/CompanySearch'
-import { API_BASE_URL } from '@/lib/api'
+import { apiFetch, bootstrapIdentity } from '@/lib/api'
 
 type SetupStep = 'business' | 'operations' | 'account' | 'payment' | 'confirmation'
 
@@ -67,6 +66,7 @@ export default function FarmSetupPage() {
   const [resendLoading, setResendLoading] = useState(false)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ sent: boolean; message: string } | null>(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
 
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [isManualMode, setIsManualMode] = useState(false)
@@ -93,6 +93,19 @@ export default function FarmSetupPage() {
 
   const activeStepIndex = setupSteps.findIndex((item) => item.id === step)
   const isSetupStep = step !== 'confirmation'
+
+  useEffect(() => {
+    bootstrapIdentity()
+      .then((identity) => {
+        setIsAuthenticated(Boolean(identity))
+        if (identity) {
+          setFirstName((current) => current || identity.user.first_name)
+          setLastName((current) => current || identity.user.last_name)
+          setEmail((current) => current || identity.user.email)
+        }
+      })
+      .catch(() => setIsAuthenticated(false))
+  }, [])
 
   const handleCompanySelect = (company: Company) => {
     setSelectedCompany(company)
@@ -147,13 +160,16 @@ export default function FarmSetupPage() {
     setResendLoading(true)
     setResendMessage(null)
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/auth/resend-confirmation`, {
-        email,
-        first_name: firstName || 'Bonde',
+      const response = await apiFetch('/api/auth/resend-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, first_name: firstName || 'Bonde' }),
       })
-      setResendMessage(response.data.message || `Ny bekreftelses-e-post er sendt til ${email}.`)
-    } catch (requestError: any) {
-      setResendMessage(requestError.response?.data?.detail || 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.detail || 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
+      setResendMessage(data.message || `Ny innloggingslenke er sendt til ${email}.`)
+    } catch (requestError) {
+      setResendMessage(requestError instanceof Error ? requestError.message : 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
     } finally {
       setResendLoading(false)
     }
@@ -168,7 +184,14 @@ export default function FarmSetupPage() {
     const finalOrgNumber = selectedCompany?.org_number || orgNumber.trim()
 
     try {
-      const registration = await axios.post(`${API_BASE_URL}/api/auth/register`, {
+      const identity = await bootstrapIdentity()
+      if (!identity) {
+        throw new Error('Logg inn med Google eller e-postlenke før du oppretter gården.')
+      }
+      const registrationResponse = await apiFetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         email: email.trim(),
@@ -178,18 +201,18 @@ export default function FarmSetupPage() {
         onboarding_role: onboardingRole,
         farm_name: finalFarmName,
         org_number: finalOrgNumber || undefined,
+        }),
       })
-      const onboardingUserId = registration.data.user_id as string
+      const registration = await registrationResponse.json().catch(() => ({}))
+      if (!registrationResponse.ok) throw new Error(registration.detail || 'Kunne ikke lagre profilen.')
       setEmailStatus({
-        sent: Boolean(registration.data.email_sent),
-        message: registration.data.email_message || registration.data.message,
+        sent: Boolean(registration.email_sent),
+        message: registration.email_message || registration.message,
       })
-
-      if (onboardingUserId) window.localStorage.setItem('barebonde_onboarding_user_id', onboardingUserId)
-
-      const farmResponse = await axios.post(
-        `${API_BASE_URL}/api/farms`,
-        {
+      const farmResponse = await apiFetch('/api/farms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           name: finalFarmName,
           org_number: finalOrgNumber,
           address: address.trim() || selectedCompany?.address || '',
@@ -204,13 +227,15 @@ export default function FarmSetupPage() {
           onboarding_goals: onboardingGoals,
           billing_method: paymentMethod,
           billing_email: billingEmail.trim() || undefined,
-        },
-        { headers: onboardingUserId ? { 'X-Onboarding-User-Id': onboardingUserId } : undefined },
-      )
-      window.localStorage.setItem('barebonde_active_farm_id', farmResponse.data.id)
+        }),
+      })
+      const farm = await farmResponse.json().catch(() => ({}))
+      if (!farmResponse.ok) throw new Error(farm.detail || 'Kunne ikke opprette gården.')
+      const updatedIdentity = await bootstrapIdentity(farm.id)
+      if (updatedIdentity?.active_farm?.id) window.localStorage.setItem('barebonde_active_farm_id', updatedIdentity.active_farm.id)
       setStep('confirmation')
-    } catch (requestError: any) {
-      setError(requestError.response?.data?.detail || 'Kunne ikke fullføre registreringen. Prøv igjen.')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Kunne ikke fullføre registreringen. Prøv igjen.')
     } finally {
       setLoading(false)
     }
@@ -415,8 +440,16 @@ export default function FarmSetupPage() {
                   </div>
                 ) : (
                   <div>
-                    <GoogleLoginButton onSuccess={handleGoogleSignup} onError={setError} redirectTo={null} deferPersistence />
+                    <GoogleLoginButton onSuccess={(user) => { setIsAuthenticated(true); handleGoogleSignup(user) }} onError={setError} redirectTo={null} />
                     <div className="relative my-6 text-center"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-stone-200" /></div><span className="relative bg-white px-3 text-xs font-bold uppercase tracking-wider text-stone-400">eller med e-post</span></div>
+                  </div>
+                )}
+
+                {!isAuthenticated && !googleUser && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                    <p className="font-semibold">Logg inn før du oppretter gården</p>
+                    <p className="mt-1 text-xs">Bruk Google over, eller få en sikker engangslenke på e-post. Gårdens eier hentes alltid fra den innloggede kontoen.</p>
+                    <Link href="/login" className="mt-3 inline-block text-sm font-medium text-bonde-green underline underline-offset-2">Logg inn med e-postlenke</Link>
                   </div>
                 )}
 

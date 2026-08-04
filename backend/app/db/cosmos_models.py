@@ -124,6 +124,9 @@ class Farm:
         onboarding_goals: Optional[List[str]] = None,
         billing_method: Optional[str] = None,
         billing_email: Optional[str] = None,
+        farm_status: str = "active",
+        created_by_user_id: Optional[str] = None,
+        version: int = 1,
         id: Optional[str] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None
@@ -143,6 +146,9 @@ class Farm:
         self.onboarding_goals = onboarding_goals or []
         self.billing_method = billing_method or ""
         self.billing_email = billing_email or ""
+        self.farm_status = farm_status
+        self.created_by_user_id = created_by_user_id
+        self.version = version
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
         self.type = "farm"  # Document type discriminator
@@ -166,6 +172,9 @@ class Farm:
             "onboarding_goals": self.onboarding_goals,
             "billing_method": self.billing_method,
             "billing_email": self.billing_email,
+            "farm_status": self.farm_status,
+            "created_by_user_id": self.created_by_user_id,
+            "version": self.version,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
         }
@@ -189,6 +198,9 @@ class Farm:
             onboarding_goals=data.get("onboarding_goals"),
             billing_method=data.get("billing_method"),
             billing_email=data.get("billing_email"),
+            farm_status=data.get("farm_status", "active"),
+            created_by_user_id=data.get("created_by_user_id"),
+            version=data.get("version", 1),
             created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None,
             updated_at=datetime.fromisoformat(data.get("updated_at")) if data.get("updated_at") else None
         )
@@ -196,20 +208,46 @@ class Farm:
 
 class FarmUser:
     """Farm-User association document in Cosmos DB"""
+
+    @staticmethod
+    def membership_id(farm_id: str, user_id: str) -> str:
+        """Stable ID for point reads in the ``/farm_id`` partition."""
+        return f"membership:{farm_id}:{user_id}"
     
     def __init__(
         self,
         user_id: str,
         farm_id: str,  # Partition key
         role: UserRole = UserRole.STAFF,
+        farm_role: Optional[str] = None,
+        membership_status: str = "active",
+        invited_by_user_id: Optional[str] = None,
+        invited_at: Optional[datetime] = None,
+        accepted_at: Optional[datetime] = None,
+        expires_at: Optional[datetime] = None,
+        farm_name: Optional[str] = None,
+        org_number: Optional[str] = None,
+        version: int = 1,
         id: Optional[str] = None,
-        created_at: Optional[datetime] = None
+        created_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
     ):
-        self.id = id or str(uuid.uuid4())
+        self.id = id or self.membership_id(farm_id, user_id)
         self.user_id = user_id
         self.farm_id = farm_id  # Partition key
-        self.role = role
+        role_value = role.value if isinstance(role, UserRole) else str(role)
+        self.farm_role = farm_role or role_value
+        self.role = self.farm_role  # Legacy compatibility during lazy migration.
+        self.membership_status = membership_status
+        self.invited_by_user_id = invited_by_user_id
+        self.invited_at = invited_at
+        self.accepted_at = accepted_at or datetime.utcnow()
+        self.expires_at = expires_at
+        self.farm_name = farm_name or ""
+        self.org_number = org_number or ""
+        self.version = version
         self.created_at = created_at or datetime.utcnow()
+        self.updated_at = updated_at or self.created_at
         self.type = "farm_user"  # Document type discriminator
     
     def to_dict(self) -> dict:
@@ -219,22 +257,42 @@ class FarmUser:
             "type": self.type,
             "user_id": self.user_id,
             "farm_id": self.farm_id,
-            "role": self.role.value if isinstance(self.role, UserRole) else self.role,
-            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
+            "farm_role": self.farm_role,
+            "role": self.role,
+            "membership_status": self.membership_status,
+            "invited_by_user_id": self.invited_by_user_id,
+            "invited_at": self.invited_at.isoformat() if isinstance(self.invited_at, datetime) else self.invited_at,
+            "accepted_at": self.accepted_at.isoformat() if isinstance(self.accepted_at, datetime) else self.accepted_at,
+            "expires_at": self.expires_at.isoformat() if isinstance(self.expires_at, datetime) else self.expires_at,
+            "farm_name": self.farm_name,
+            "org_number": self.org_number,
+            "version": self.version,
+            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
+            "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
         }
     
     @staticmethod
     def from_dict(data: dict) -> "FarmUser":
         """Create from Cosmos DB document"""
-        role_value = data.get("role", "staff")
-        role = UserRole(role_value) if isinstance(role_value, str) else role_value
+        role_value = data.get("farm_role") or data.get("role", "staff")
+        role = UserRole(role_value) if role_value in {item.value for item in UserRole} else UserRole.STAFF
         
         return FarmUser(
             id=data.get("id"),
             user_id=data.get("user_id"),
             farm_id=data.get("farm_id"),
             role=role,
-            created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None
+            farm_role=data.get("farm_role"),
+            membership_status=data.get("membership_status", "active"),
+            invited_by_user_id=data.get("invited_by_user_id"),
+            invited_at=datetime.fromisoformat(data.get("invited_at")) if data.get("invited_at") else None,
+            accepted_at=datetime.fromisoformat(data.get("accepted_at")) if data.get("accepted_at") else None,
+            expires_at=datetime.fromisoformat(data.get("expires_at")) if data.get("expires_at") else None,
+            farm_name=data.get("farm_name"),
+            org_number=data.get("org_number"),
+            version=data.get("version", 1),
+            created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None,
+            updated_at=datetime.fromisoformat(data.get("updated_at")) if data.get("updated_at") else None,
         )
 
 

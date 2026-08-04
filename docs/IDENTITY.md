@@ -7,7 +7,7 @@ Barebonde bruker fortsatt én FastAPI-basert Azure Function App. Identity er en 
 - `POST /api/auth/google` validerer Google ID-token på serveren, løser Google-subjekt/e-post til en intern `user_id`, oppretter en Cosmos-sesjon og setter en `HttpOnly`-cookie.
 - `POST /api/auth/magic-link` oppretter en e-postbasert utfordring som kan brukes én gang. Plunk leverer lenken.
 - `POST /api/auth/magic-link/verify` bruker utfordringen én gang og oppretter sesjonen.
-- `GET /api/me` returnerer bare bruker, gjeldende sesjon og CSRF-token.
+- `GET /api/me` returnerer bruker, gjeldende sesjon, CSRF-token og aktive Farm-medlemskap. Den aktive gården er alltid validert mot de aktive medlemskapene.
 - `POST /api/auth/logout`, `GET /api/auth/sessions` og `DELETE /api/auth/sessions/{session_id}` gir avslutning og egen sesjonsoversikt. Muterende sesjonsruter krever `X-CSRF-Token`.
 
 ## Cosmos-data
@@ -25,4 +25,4 @@ Sett en separat, tilfeldig `IDENTITY_HMAC_KEY` i Function App-konfigurasjonen. I
 
 Produksjonsfrontend og API ligger på forskjellige origins i dagens oppsett. CORS tillater `barebonde.no`, og produksjonscookie bruker `SameSite=None; Secure`. Cloudflare/API-domeneoppsett må verifiseres i en ekte nettleser, siden strenge tredjeparts-cookie-regler kan kreve en same-site API-domenevariant. Dette dokumentet endrer ikke Cloudflare eller Azure.
 
-Denne fasen innfører ikke FarmUser-roller, tenant-autorisering, abonnement, entitlements, invites eller betalingsintegrasjon. De eksisterende gårds- og regnskapsrutene blir derfor ikke påstått å være autorisert av Identity ennå.
+Identity bestemmer bare hvem brukeren er. `FarmUser` bestemmer hvilken Farm brukeren har tilgang til og hvilke Farm-handlinger rollen tillater; se [Farm-medlemskap](./FARM_MEMBERSHIP.md). Denne fasen innfører ikke abonnement, entitlements, invites eller betalingsintegrasjon. Regnskaps-, bilags-, dokument- og Blob-ruter er fortsatt ikke påstått å være tenant-autorisert.

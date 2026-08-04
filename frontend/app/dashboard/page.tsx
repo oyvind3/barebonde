@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { API_BASE_URL, bootstrapIdentity } from '@/lib/api'
+import { API_BASE_URL, bootstrapIdentity, IdentityBootstrap } from '@/lib/api'
 
 type MonthlyRow = { month: string; income: number; expense: number; net: number }
 
@@ -19,14 +19,32 @@ export default function Dashboard() {
   const [journalCount, setJournalCount] = useState(0)
 
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [memberships, setMemberships] = useState<IdentityBootstrap['memberships']>([])
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    setFarmId(storedFarmId)
-    bootstrapIdentity()
-      .then((identity) => setIsAuthenticated(Boolean(identity)))
-      .catch(() => setIsAuthenticated(false))
+    bootstrapIdentity(storedFarmId)
+      .then((identity) => {
+        setIsAuthenticated(Boolean(identity))
+        setMemberships(identity?.memberships || [])
+        const activeFarmId = identity?.active_farm?.id || ''
+        setFarmId(activeFarmId)
+        if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
+        else window.localStorage.removeItem(FARM_ID_KEY)
+      })
+      .catch(() => {
+        setIsAuthenticated(false)
+        setMemberships([])
+        setFarmId('')
+      })
   }, [])
+
+  const selectFarm = (nextFarmId: string) => {
+    const isMember = memberships.some((membership) => membership.farm.id === nextFarmId)
+    if (!isMember) return
+    window.localStorage.setItem(FARM_ID_KEY, nextFarmId)
+    setFarmId(nextFarmId)
+  }
 
   useEffect(() => {
     if (!farmId) {
@@ -110,6 +128,15 @@ export default function Dashboard() {
             </Button>
           </div>
         </div>
+
+        {memberships.length > 1 && (
+          <div className="mb-6 flex max-w-sm flex-col gap-1">
+            <label htmlFor="active-farm" className="text-xs font-bold uppercase tracking-wider text-stone-600">Aktiv gård</label>
+            <select id="active-farm" value={farmId} onChange={(event) => selectFarm(event.target.value)} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800">
+              {memberships.map((membership) => <option key={membership.farm.id} value={membership.farm.id}>{membership.farm.name}</option>)}
+            </select>
+          </div>
+        )}
 
         {/* Preview shown until a server-managed session is present. */}
         {!isAuthenticated && (

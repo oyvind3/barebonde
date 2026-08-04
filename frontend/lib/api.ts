@@ -22,6 +22,28 @@ export type IdentityBootstrap = {
     current: boolean
   }
   csrf_token: string
+  csrf: {
+    token: string
+    expires_at: string
+  }
+  memberships: Array<{
+    farm: {
+      id: string
+      name: string
+      org_number: string
+      farm_status: string
+    }
+    farm_role: string
+    membership_status: string
+  }>
+  active_farm: {
+    id: string
+    name: string
+    org_number: string
+    farm_status: string
+  } | null
+  subscription: null
+  entitlements: Record<string, boolean>
 }
 
 let csrfToken = ''
@@ -39,8 +61,12 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   return fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include' })
 }
 
-export async function bootstrapIdentity(): Promise<IdentityBootstrap | null> {
-  const response = await apiFetch('/api/me')
+export async function bootstrapIdentity(preferredFarmId?: string): Promise<IdentityBootstrap | null> {
+  const selectedFarmId = preferredFarmId || (
+    typeof window !== 'undefined' ? window.localStorage.getItem('barebonde_active_farm_id') || '' : ''
+  )
+  const query = selectedFarmId ? `?active_farm_id=${encodeURIComponent(selectedFarmId)}` : ''
+  const response = await apiFetch(`/api/me${query}`)
   if (response.status === 401) return null
   if (!response.ok) throw new Error('Kunne ikke hente innlogget bruker.')
   const identity = await response.json() as IdentityBootstrap

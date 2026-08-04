@@ -14,9 +14,9 @@ Cloudflare- og Azure-konfigurasjon håndteres manuelt i MVP-en. Det er ikke plan
 
 ## Sikkerhetsstatus
 
-Identity-MVP-en bruker verifiserte Google ID-token eller en e-postbasert engangslenke, serverstyrte ugjennomsiktige Cosmos-sesjoner, `HttpOnly`-cookie og CSRF-token. `GET /api/me` returnerer kun bruker- og sesjonsdata. Rå sesjonstoken, e-postadresser og Google-subjekter lagres ikke i Identity-oppslagsdokumenter.
+Identity-MVP-en bruker verifiserte Google ID-token eller en e-postbasert engangslenke, serverstyrte ugjennomsiktige Cosmos-sesjoner, `HttpOnly`-cookie og CSRF-token. `Farm` er tenant-modellen, og en aktiv `FarmUser`-tilknytning er den autoritative kilden til tilgang. `GET /api/me` returnerer bruker, sesjon, CSRF-token, aktive medlemskap og en validert aktiv gård. Rå sesjonstoken, e-postadresser og Google-subjekter lagres ikke i Identity-oppslagsdokumenter.
 
-`IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-medlemskap, tenant-autorisering, abonnement og entitlements er fortsatt ikke implementert, og en aktiv sesjon gir derfor ikke autoritativ tilgang til gårdsdata ennå. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
+`IDENTITY_HMAC_KEY` må settes som en separat Function App-hemmelighet før innlogging kan brukes; Identity-rutene feiler lukket når den mangler. Cosmos-containere opprettes og valideres bare med et eksplisitt, manuelt bootstrap-steg. Farm-rutene er medlemskapsbeskyttet, mens regnskap, bilag, dokumenter og Blob-tilgang fortsatt skal tenant-sikres i neste fase. Abonnement og entitlements er ikke implementert. Ory/Kratos, Better Auth, SQLAlchemy og PostgreSQL er ikke del av løsningen.
 
 Et eventuelt tidligere Ory-prosjekt må slettes eller deaktiveres manuelt i Ory-konsollen; repositoryet kan ikke gjøre dette.
 
@@ -84,6 +84,7 @@ docs/architecture/       Arkitekturbeslutninger
 - [Arkitekturbeslutninger](./docs/architecture/adr.md)
 - [Cosmos-bootstrap](./docs/COSMOS_BOOTSTRAP.md)
 - [Identity-MVP](./docs/IDENTITY.md)
+- [Farm-medlemskap og tenant-isolasjon](./docs/FARM_MEMBERSHIP.md)
 - [Produktbacklog](./backlog/epics.md)
 - [Google-oppsett](./docs/GOOGLE_OAUTH_SETUP.md)
 - [Statusrapport](./STATUS_REPORT.md)
@@ -91,4 +92,4 @@ docs/architecture/       Arkitekturbeslutninger
 
 ## Neste planlagte fase
 
-`Autoritativ FarmUser-tilknytning og tenant-autorisering`.
+`Tenant-sikring av bilag, dokumenter, bokføring, rapporter og Blob-tilgang`.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -31,10 +31,33 @@ class AuthenticatedResponse(IdentityUserResponse):
     message: str
 
 
+class CsrfResponse(BaseModel):
+    token: str
+    expires_at: str
+
+
+class FarmSnapshotResponse(BaseModel):
+    id: str
+    name: str
+    org_number: str
+    farm_status: str = "active"
+
+
+class MembershipResponse(BaseModel):
+    farm: FarmSnapshotResponse
+    farm_role: str
+    membership_status: str
+
+
 class MeResponse(BaseModel):
     user: IdentityUserResponse
     session: SessionResponse
     csrf_token: str
+    csrf: CsrfResponse
+    memberships: List[MembershipResponse] = []
+    active_farm: Optional[FarmSnapshotResponse] = None
+    subscription: None = None
+    entitlements: Dict[str, bool] = {}
 
 
 class SessionListResponse(BaseModel):

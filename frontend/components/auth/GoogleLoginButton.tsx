@@ -105,7 +105,7 @@ export function GoogleLoginButton({
       if (!deferPersistence) rememberCsrfToken(userData.csrf_token)
       const user: GoogleUser = deferPersistence
         ? { ...userData, credential: response.credential, message: 'Google-identiteten er verifisert.' }
-        : userData as GoogleUser
+        : { ...userData, credential: response.credential } as GoogleUser
       onSuccessRef.current?.(user)
       if (!deferPersistence && redirectTo) router.push(redirectTo)
     } catch (err) {
