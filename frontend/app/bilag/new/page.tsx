@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Image from 'next/image'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -352,7 +353,7 @@ export default function NewVoucherPage() {
                       Valgt fil: <span className="font-semibold">{selectedFile.name}</span>
                     </p>
                     {imagePreview && previewUrl && (
-                      <img src={previewUrl} alt="Forhåndsvisning bilag" className="mt-3 rounded-lg max-h-72 object-contain" />
+                      <Image src={previewUrl} alt="Forhåndsvisning bilag" width={720} height={480} unoptimized className="mt-3 max-h-72 rounded-lg object-contain" />
                     )}
                   </div>
                 )}
