@@ -1,95 +1,121 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { API_BASE_URL } from '@/lib/api'
+
+export type GoogleUser = {
+  user_id: string
+  email: string
+  first_name: string
+  last_name: string
+  picture?: string | null
+  message: string
+}
 
 interface GoogleCredentialResponse {
-  clientId: string
   credential: string
-  select_by: string
 }
 
 interface GoogleLoginButtonProps {
-  onSuccess?: (response: any) => void
+  onSuccess?: (user: GoogleUser) => void
   onError?: (error: string) => void
   disabled?: boolean
   className?: string
+  redirectTo?: string | null
 }
 
 declare global {
   interface Window {
-    google: any
+    google?: any
   }
 }
 
-/**
- * Google Login Button Component
- * 
- * Uses Google Identity Services to safely handle OAuth 2.0 authentication.
- * Token is verified on the backend before the user is authenticated.
- * 
- * Security:
- * - GOOGLE_CLIENT_ID is safe to expose (it's public)
- * - JWT token is sent to backend for verification
- * - GOOGLE_CLIENT_SECRET stays on backend only
- * - Token is verified server-side with google-auth library
- */
 export function GoogleLoginButton({
   onSuccess,
   onError,
+  disabled = false,
   className = '',
+  redirectTo = '/dashboard',
 }: GoogleLoginButtonProps) {
   const router = useRouter()
   const googleButtonRef = useRef<HTMLDivElement>(null)
+  const onSuccessRef = useRef(onSuccess)
+  const onErrorRef = useRef(onError)
+  const [clientId, setClientId] = useState(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Load Google Identity Services script
-    const script = document.createElement('script')
-    script.src = 'https://accounts.google.com/gsi/client'
-    script.async = true
-    script.defer = true
+    onSuccessRef.current = onSuccess
+    onErrorRef.current = onError
+  }, [onError, onSuccess])
 
-    script.onload = () => {
-      if (window.google) {
-        initializeGoogleButton()
+  useEffect(() => {
+    if (clientId) return
+
+    const controller = new AbortController()
+    const loadGoogleConfig = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/google/config`, { signal: controller.signal })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || !data.client_id) {
+          throw new Error(data.detail || 'Google innlogging er ikke konfigurert på serveren.')
+        }
+        setClientId(data.client_id)
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        const message = err instanceof Error ? err.message : 'Klarte ikke hente Google-konfigurasjon.'
+        setError(message)
+        onErrorRef.current?.(message)
       }
     }
 
-    script.onerror = () => {
-      const errorMsg = 'Klarte ikke laste Google Sign-In'
-      setError(errorMsg)
-      onError?.(errorMsg)
+    loadGoogleConfig()
+    return () => controller.abort()
+  }, [clientId])
+
+  const handleCredentialResponse = useCallback(async (response: GoogleCredentialResponse) => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      if (!response.credential) {
+        throw new Error('Ingen token mottatt fra Google.')
+      }
+
+      const backendResponse = await fetch(`${API_BASE_URL}/api/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: response.credential }),
+      })
+      const userData = await backendResponse.json().catch(() => ({}))
+      if (!backendResponse.ok) {
+        throw new Error(userData.detail || 'Google-autentisering feilet på serveren.')
+      }
+
+      const user = userData as GoogleUser
+      window.localStorage.setItem('user', JSON.stringify(user))
+      onSuccessRef.current?.(user)
+      if (redirectTo) router.push(redirectTo)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Google-autentisering feilet.'
+      setError(message)
+      onErrorRef.current?.(message)
+    } finally {
+      setLoading(false)
     }
+  }, [redirectTo, router])
 
-    document.body.appendChild(script)
+  const initializeGoogleButton = useCallback(() => {
+    if (!window.google || !googleButtonRef.current || !clientId) return
 
-    return () => {
-      document.body.removeChild(script)
-    }
-  }, [onError])
-
-  const initializeGoogleButton = () => {
-    if (!window.google || !googleButtonRef.current) return
-
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
-    if (!clientId) {
-      const errorMsg = 'Google Client ID not configured'
-      console.error(errorMsg)
-      setError(errorMsg)
-      onError?.(errorMsg)
-      return
-    }
-
-    // Initialize Google Sign-In button
     window.google.accounts.id.initialize({
       client_id: clientId,
       callback: handleCredentialResponse,
       auto_select: false,
     })
-
-    // Render the button into the container
+    googleButtonRef.current.replaceChildren()
     window.google.accounts.id.renderButton(googleButtonRef.current, {
       type: 'standard',
       shape: 'rectangular',
@@ -99,96 +125,59 @@ export function GoogleLoginButton({
       logo_alignment: 'left',
       width: '100%',
     })
-  }
+  }, [clientId, handleCredentialResponse])
 
-  /**
-   * Handle credential response from Google
-   * Sends JWT token to backend for verification
-   */
-  const handleCredentialResponse = async (
-    response: GoogleCredentialResponse
-  ) => {
-    setLoading(true)
-    setError(null)
+  useEffect(() => {
+    if (!clientId) return
 
-    try {
-      if (!response.credential) {
-        throw new Error('Ingen token mottatt fra Google')
-      }
-
-      // Send JWT token to backend for verification
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const res = await fetch(`${apiUrl}/api/auth/google`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token: response.credential,
-        }),
-      })
-
-      if (!res.ok) {
-        const errorData = await res.json()
-        throw new Error(
-          errorData.detail || 'Google autentisering feilet på serveren'
-        )
-      }
-
-      const userData = await res.json()
-      console.log('Google auth successful:', userData)
-
-      // Call success callback if provided
-      if (onSuccess) {
-        onSuccess(userData)
-      }
-
-      // Store auth info and redirect to dashboard
-      if (typeof window !== 'undefined') {
-        // Store user info in localStorage (or use a proper auth state manager)
-        localStorage.setItem('user', JSON.stringify(userData))
-      }
-
-      // Redirect to dashboard
-      router.push('/dashboard')
-    } catch (err) {
-      const errorMsg =
-        err instanceof Error ? err.message : 'Google autentisering feilet'
-      console.error('Google auth error:', errorMsg)
-      setError(errorMsg)
-      onError?.(errorMsg)
-    } finally {
-      setLoading(false)
+    if (window.google) {
+      initializeGoogleButton()
+      return
     }
-  }
+
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-google-identity-services]')
+    const script = existingScript || document.createElement('script')
+    const onLoad = () => initializeGoogleButton()
+    const handleScriptError = () => {
+      const message = 'Klarte ikke laste Google Sign-In.'
+      setError(message)
+      onErrorRef.current?.(message)
+    }
+
+    script.addEventListener('load', onLoad)
+    script.addEventListener('error', handleScriptError)
+    if (!existingScript) {
+      script.src = 'https://accounts.google.com/gsi/client'
+      script.async = true
+      script.defer = true
+      script.dataset.googleIdentityServices = 'true'
+      document.body.appendChild(script)
+    }
+
+    return () => {
+      script.removeEventListener('load', onLoad)
+      script.removeEventListener('error', handleScriptError)
+    }
+  }, [clientId, initializeGoogleButton])
 
   return (
     <div className={className}>
-      {/* Google Button Container */}
-      <div
-        ref={googleButtonRef}
-        className="flex justify-center"
-        style={{
-          minHeight: '40px',
-          display: 'flex',
-          alignItems: 'center',
-        }}
-      />
+      <div className={disabled ? 'pointer-events-none opacity-50' : ''}>
+        <div
+          ref={googleButtonRef}
+          className="flex justify-center"
+          style={{ minHeight: '40px', display: 'flex', alignItems: 'center' }}
+        />
+      </div>
 
-      {/* Error Message */}
       {error && (
         <div className="mt-3 bg-rose-50 border-l-4 border-rose-500 text-rose-800 p-3 text-sm rounded-r-lg">
-          <p className="font-semibold">Google innlogging feilet</p>
+          <p className="font-semibold">Google-innlogging feilet</p>
           <p>{error}</p>
         </div>
       )}
 
-      {/* Loading State */}
-      {loading && (
-        <div className="mt-3 text-center text-sm text-stone-600">
-          Verifiserer med Google...
-        </div>
-      )}
+      {loading && <div className="mt-3 text-center text-sm text-stone-600">Verifiserer med Google...</div>}
     </div>
   )
 }

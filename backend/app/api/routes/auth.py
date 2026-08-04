@@ -1,18 +1,17 @@
-"""
-User authentication and registration API routes
-Supports Cosmos DB user store, Plunk magic links, and Google OAuth setup
-"""
+"""User authentication, onboarding, Plunk email, and Google OAuth routes."""
 
-import os
-from typing import Optional
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, EmailStr
-import httpx
+from __future__ import annotations
+
+import html
 import logging
+import os
+from typing import Any, Optional
 
-# Google OAuth verification
+import httpx
+from fastapi import APIRouter, HTTPException, status
 from google.auth.transport import requests
 from google.oauth2 import id_token
+from pydantic import BaseModel, EmailStr
 
 from app.db.cosmos_client import get_users_container
 from app.db.cosmos_models import User
@@ -20,20 +19,18 @@ from app.db.cosmos_models import User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PLUNK_API_TOKEN = (
-    os.getenv("PLUNK_SECRET_API_KEY") or
-    os.getenv("PLUNK_PUBLIC_API_KEY") or
-    os.getenv("PLUNK_API_TOKEN") or
-    ""
-).strip()
+DEFAULT_PLUNK_API_URL = "https://next-api.useplunk.com/v1/send"
+DEFAULT_FRONTEND_URL = "https://salmon-ocean-076260203.7.azurestaticapps.net"
 
-PLUNK_API_URL = os.getenv("PLUNK_API_URL", "https://api.useplunk.com/v1/send").strip()
+
+class EmailDeliveryError(Exception):
+    """Raised when a transactional email cannot be submitted to Plunk."""
 
 
 class RegisterRequest(BaseModel):
     first_name: str
     last_name: str
-    email: str
+    email: EmailStr
     password: str
     address: Optional[str] = None
     farm_name: Optional[str] = None
@@ -46,326 +43,322 @@ class AuthResponse(BaseModel):
     first_name: str
     last_name: str
     message: str
+    email_sent: bool = False
+    email_message: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
 class MagicLinkRequest(BaseModel):
-    email: str
+    email: EmailStr
     first_name: Optional[str] = "Bonde"
 
 
-@router.post("/resend-confirmation")
-async def resend_confirmation_email(req: MagicLinkRequest):
-    """
-    Resends activation / magic link email using Plunk API with detailed logging.
-    """
-    token = PLUNK_API_TOKEN or os.getenv("PLUNK_SECRET_API_KEY") or os.getenv("PLUNK_API_TOKEN")
-    logger.info(f"Attempting resend confirmation to {req.email}. Token configured: {bool(token)}")
+class GoogleTokenRequest(BaseModel):
+    token: str
+
+
+class GoogleConfigResponse(BaseModel):
+    client_id: str
+
+
+class GoogleAuthResponse(BaseModel):
+    user_id: str
+    email: str
+    first_name: str
+    last_name: str = ""
+    picture: Optional[str] = None
+    message: str
+
+
+def _get_plunk_config() -> tuple[str, str, str, Optional[str], str]:
+    """Read Plunk configuration at request time without accepting public keys."""
+    token = (
+        os.getenv("PLUNK_SECRET_KEY")
+        or os.getenv("PLUNK_SECRET_API_KEY")
+        or os.getenv("PLUNK_API_TOKEN")
+        or ""
+    ).strip()
+    from_email = (os.getenv("PLUNK_FROM_EMAIL") or "").strip()
+    from_name = (os.getenv("PLUNK_FROM_NAME") or "Barebonde").strip()
+    reply_to = (os.getenv("PLUNK_REPLY_TO_EMAIL") or "").strip() or None
+    api_url = (os.getenv("PLUNK_API_URL") or DEFAULT_PLUNK_API_URL).strip()
 
     if not token:
-        logger.warning("No Plunk token configured! Check PLUNK_SECRET_API_KEY / PLUNK_API_TOKEN in Azure App Settings.")
-        return {"status": "warning", "message": "E-post sendt på nytt (Ingen Plunk API nøkkel konfigurert på server)"}
+        raise EmailDeliveryError("E-posttjenesten er ikke konfigurert med en Plunk secret key.")
+    if not token.startswith("sk_"):
+        raise EmailDeliveryError("Plunk-koden må være en secret key (sk_), ikke en public key (pk_).")
+    if not from_email:
+        raise EmailDeliveryError("PLUNK_FROM_EMAIL mangler. Den må være en avsender fra et verifisert domene i Plunk.")
+
+    return token, from_email, from_name, reply_to, api_url
+
+
+def _plunk_error_message(response: httpx.Response) -> str:
+    """Return a safe, concise provider message without logging response bodies."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return f"Plunk svarte med HTTP {response.status_code}."
+
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        message = error.get("message")
+    else:
+        message = error or (payload.get("message") if isinstance(payload, dict) else None)
+    return str(message or f"Plunk svarte med HTTP {response.status_code}.")
+
+
+async def _send_plunk_email(*, to: str, subject: str, body: str) -> None:
+    """Send one transactional email through Plunk's current public API."""
+    token, from_email, from_name, reply_to, api_url = _get_plunk_config()
+    sender: str | dict[str, str] = {"email": from_email, "name": from_name} if from_name else from_email
+    payload: dict[str, Any] = {"to": to, "from": sender, "subject": subject, "body": body}
+    if reply_to:
+        payload["reply"] = reply_to
 
     try:
         async with httpx.AsyncClient() as client:
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "to": req.email,
-                "subject": "Bekreft din e-post for Barebonde 🌾",
-                "body": f"<h1>Hei {req.first_name}!</h1><p>Du ba om å få bekreftelseslenken på nytt.</p><p><a href='https://salmon-ocean-076260203.7.azurestaticapps.net/dashboard'>Klikk her for å bekrefte e-posten og gå til dashbordet</a></p>"
-            }
-            
-            # Primary endpoint
-            resp = await client.post(PLUNK_API_URL, headers=headers, json=payload, timeout=8.0)
-            logger.info(f"Plunk API primary response status: {resp.status_code}, body: {resp.text}")
+            response = await client.post(
+                api_url,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=10.0,
+            )
+    except httpx.HTTPError as exc:
+        raise EmailDeliveryError("Kunne ikke kontakte Plunk for å sende e-post.") from exc
 
-            if resp.status_code >= 400:
-                # Try fallback URL if next-api vs api endpoint differs
-                fallback_url = "https://next-api.useplunk.com/v1/send" if "api.useplunk.com" in PLUNK_API_URL else "https://api.useplunk.com/v1/send"
-                logger.info(f"Retrying Plunk with fallback URL: {fallback_url}")
-                resp_fb = await client.post(fallback_url, headers=headers, json=payload, timeout=8.0)
-                logger.info(f"Plunk API fallback response status: {resp_fb.status_code}, body: {resp_fb.text}")
-                if resp_fb.status_code >= 400:
-                    raise HTTPException(status_code=500, detail=f"Plunk error {resp_fb.status_code}: {resp_fb.text}")
+    if response.status_code >= 400:
+        raise EmailDeliveryError(_plunk_error_message(response))
 
-        return {"status": "ok", "message": "Bekreftelses-e-post sendt på nytt via Plunk!"}
-    except Exception as exc:
-        logger.error(f"Resend Plunk email failed: {exc}")
-        raise HTTPException(status_code=500, detail=f"Kunne ikke sende e-post via Plunk: {exc}")
+    try:
+        response_payload = response.json()
+    except ValueError:
+        response_payload = {}
+    if isinstance(response_payload, dict) and response_payload.get("success") is False:
+        raise EmailDeliveryError(_plunk_error_message(response))
+
+
+def _frontend_url() -> str:
+    return (os.getenv("FRONTEND_URL") or DEFAULT_FRONTEND_URL).rstrip("/")
+
+
+async def _send_confirmation_email(email: str, first_name: str, *, is_resend: bool = False) -> None:
+    safe_name = html.escape(first_name or "Bonde")
+    action = "Du ba om å få bekreftelseslenken på nytt." if is_resend else "Takk for at du opprettet konto hos Barebonde."
+    await _send_plunk_email(
+        to=email,
+        subject="Bekreft din e-post for Barebonde",
+        body=(
+            f"<h1>Hei {safe_name}!</h1><p>{action}</p>"
+            f"<p><a href='{_frontend_url()}/dashboard'>Åpne Barebonde</a></p>"
+        ),
+    )
+
+
+@router.post("/resend-confirmation")
+async def resend_confirmation_email(req: MagicLinkRequest) -> dict[str, str]:
+    """Resend a confirmation email and report actual provider failures to the UI."""
+    try:
+        await _send_confirmation_email(str(req.email), req.first_name or "Bonde", is_resend=True)
+    except EmailDeliveryError as exc:
+        logger.warning("Confirmation resend failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    return {"status": "ok", "message": "Bekreftelses-e-post er sendt på nytt."}
 
 
 @router.post("/register")
 async def register_user(req: RegisterRequest) -> AuthResponse:
-    """
-    Register a new user in Cosmos DB and send a welcome magic link via Plunk API.
-    """
+    """Create a Cosmos user and submit an email confirmation through Plunk."""
     users_container = get_users_container()
-
-    # Check existing user in Cosmos DB
-    query = f"SELECT * FROM c WHERE c.email = '{req.email.lower()}'"
+    email = str(req.email).lower()
+    query = f"SELECT * FROM c WHERE c.email = '{email}'"
     existing = list(users_container.query_items(query=query, enable_cross_partition_query=True))
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="En bruker med denne e-postadressen finnes allerede."
+            detail="En bruker med denne e-postadressen finnes allerede.",
         )
 
-    # Create new User model
     user = User(
-        email=req.email.lower(),
-        better_auth_id=f"user_{req.email.lower()}",
+        email=email,
+        better_auth_id=f"user_{email}",
         first_name=req.first_name.strip(),
-        last_name=req.last_name.strip()
+        last_name=req.last_name.strip(),
     )
-
     try:
         users_container.upsert_item(user.to_dict())
     except Exception as exc:
-        logger.error(f"Failed saving user to Cosmos DB: {exc}")
-        pass
+        logger.error("Failed saving onboarding user: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Kunne ikke opprette brukeren akkurat nå. Prøv igjen.",
+        ) from exc
 
-    # Try sending login/welcome email via Plunk API
-    token = PLUNK_API_TOKEN or os.getenv("PLUNK_SECRET_API_KEY") or os.getenv("PLUNK_API_TOKEN")
-    logger.info(f"Register user {req.email}. Sending welcome email via Plunk. Token configured: {bool(token)}")
-
-    if token:
-        try:
-            async with httpx.AsyncClient() as client:
-                headers = {
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "to": req.email,
-                    "subject": "Velkommen til Barebonde 🌾",
-                    "body": f"<h1>Hei {req.first_name}!</h1><p>Takk for at du opprettet konto hos Barebonde.</p><p><a href='https://salmon-ocean-076260203.7.azurestaticapps.net/dashboard'>Klikk her for å gå til dashbordet ditt</a></p>"
-                }
-                resp = await client.post(PLUNK_API_URL, headers=headers, json=payload, timeout=8.0)
-                logger.info(f"Register Plunk API response status: {resp.status_code}, body: {resp.text}")
-
-                if resp.status_code >= 400:
-                    fallback_url = "https://next-api.useplunk.com/v1/send" if "api.useplunk.com" in PLUNK_API_URL else "https://api.useplunk.com/v1/send"
-                    logger.info(f"Retrying register Plunk with fallback URL: {fallback_url}")
-                    resp_fb = await client.post(fallback_url, headers=headers, json=payload, timeout=8.0)
-                    logger.info(f"Register Plunk API fallback response: {resp_fb.status_code}, body: {resp_fb.text}")
-        except Exception as exc:
-            logger.error(f"Plunk email sending failed in register: {exc}")
-    else:
-        logger.warning("PLUNK_SECRET_API_KEY / PLUNK_API_TOKEN is NOT set in environment!")
+    try:
+        await _send_confirmation_email(email, user.first_name or "Bonde")
+    except EmailDeliveryError as exc:
+        logger.warning("Registration email was not sent: %s", exc)
+        return AuthResponse(
+            user_id=user.id,
+            email=user.email,
+            first_name=user.first_name or "",
+            last_name=user.last_name or "",
+            email_sent=False,
+            email_message=str(exc),
+            message="Kontoen er opprettet, men bekreftelses-e-posten kunne ikke sendes.",
+        )
 
     return AuthResponse(
         user_id=user.id,
         email=user.email,
         first_name=user.first_name or "",
         last_name=user.last_name or "",
-        message="Bruker opprettet! Du kan nå logge inn."
+        email_sent=True,
+        email_message="Bekreftelses-e-post er sendt.",
+        message="Bruker opprettet. Sjekk e-posten din for videre instruksjoner.",
     )
 
 
 @router.post("/login")
 async def login_user(req: LoginRequest) -> AuthResponse:
-    """
-    Authenticate user using email and password.
-    """
+    """Authenticate an existing user in the current demo-mode flow."""
     users_container = get_users_container()
-    query = f"SELECT * FROM c WHERE c.email = '{req.email.lower()}'"
+    email = str(req.email).lower()
+    query = f"SELECT * FROM c WHERE c.email = '{email}'"
     users = list(users_container.query_items(query=query, enable_cross_partition_query=True))
 
     if not users:
-        # Fallback demo auth for smooth experience
         return AuthResponse(
             user_id="demo-user-id",
-            email=req.email,
+            email=email,
             first_name="Bonde",
             last_name="Bruker",
-            message="Innlogget i demo-modus"
+            message="Innlogget i demo-modus",
         )
 
     user_data = users[0]
     return AuthResponse(
         user_id=user_data.get("id", "demo-id"),
-        email=user_data.get("email", req.email),
+        email=user_data.get("email", email),
         first_name=user_data.get("first_name", "Bonde"),
         last_name=user_data.get("last_name", ""),
-        message="Vellykket innlogging"
+        message="Vellykket innlogging",
     )
 
 
 @router.post("/magic-link")
-async def send_magic_link(req: MagicLinkRequest):
-    """
-    Send magic login link via Plunk API.
-    """
-    if not PLUNK_API_TOKEN:
-        return {"status": "ok", "message": "Demo modus: Magisk lenke sendt (Plunk token ikke satt)"}
-
+async def send_magic_link(req: MagicLinkRequest) -> dict[str, str]:
+    """Send a magic-link style dashboard email through the same Plunk sender."""
     try:
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                "https://api.useplunk.com/v1/send",
-                headers={"Authorization": f"Bearer {PLUNK_API_TOKEN}"},
-                json={
-                    "to": req.email,
-                    "subject": "Din innloggingslenke til Barebonde 🔑",
-                    "body": f"<h1>Logg inn på Barebonde</h1><p><a href='https://salmon-ocean-076260203.7.azurestaticapps.net/dashboard'>Klikk her for direkte innlogging</a></p>"
-                },
-                timeout=5.0
-            )
-        return {"status": "ok", "message": "Innloggingslenke sendt på e-post!"}
-    except Exception as exc:
-        logger.error(f"Error sending magic link: {exc}")
-        return {"status": "ok", "message": "Klarte ikke sende e-post, prøv med passord."}
-
-
-# ============================================================================
-# Google OAuth Integration
-# ============================================================================
-
-class GoogleTokenRequest(BaseModel):
-    """Request body for Google OAuth token verification"""
-    token: str
-
-
-class GoogleAuthResponse(BaseModel):
-    """Safe response after Google token verification"""
-    user_id: str
-    email: str
-    first_name: str
-    picture: Optional[str] = None
-    message: str
-
-
-async def verify_google_token(token: str) -> dict:
-    """
-    Verify Google JWT token and extract user info.
-    
-    Args:
-        token: JWT token from Google Identity Services
-        
-    Returns:
-        dict with user info: sub (user ID), email, name, picture, etc.
-        
-    Raises:
-        ValueError: If token is invalid or expired
-    """
-    try:
-        google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-        if not google_client_id:
-            logger.error("GOOGLE_CLIENT_ID not configured")
-            raise ValueError("Google OAuth not configured on server")
-        
-        # Verify the JWT token signature and claims
-        request = requests.Request()
-        payload = id_token.verify_oauth2_token(
-            token,
-            request,
-            audience=google_client_id
+        await _send_plunk_email(
+            to=str(req.email),
+            subject="Din innloggingslenke til Barebonde",
+            body=(
+                f"<h1>Logg inn på Barebonde</h1>"
+                f"<p><a href='{_frontend_url()}/dashboard'>Åpne dashboardet</a></p>"
+            ),
         )
-        
-        # Token is valid, return the payload with user info
-        return payload
-        
+    except EmailDeliveryError as exc:
+        logger.warning("Magic-link email was not sent: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    return {"status": "ok", "message": "Innloggingslenke sendt på e-post."}
+
+
+def _get_google_client_id() -> str:
+    return (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+
+
+@router.get("/google/config", response_model=GoogleConfigResponse)
+async def google_config() -> GoogleConfigResponse:
+    """Expose the public Google client ID at runtime for the static frontend."""
+    client_id = _get_google_client_id()
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google innlogging er ikke konfigurert på serveren.",
+        )
+    return GoogleConfigResponse(client_id=client_id)
+
+
+async def verify_google_token(token: str) -> dict[str, Any]:
+    """Verify a Google Identity Services credential against the configured audience."""
+    google_client_id = _get_google_client_id()
+    if not google_client_id:
+        raise ValueError("Google OAuth er ikke konfigurert på serveren.")
+
+    try:
+        return id_token.verify_oauth2_token(token, requests.Request(), audience=google_client_id)
     except Exception as exc:
-        logger.error(f"Google token verification failed: {exc}")
-        raise ValueError(f"Invalid Google token: {str(exc)}")
+        logger.warning("Google token verification failed: %s", exc)
+        raise ValueError("Google-tokenet er ugyldig eller utløpt.") from exc
 
 
-@router.post("/google")
+@router.post("/google", response_model=GoogleAuthResponse)
 async def google_auth(req: GoogleTokenRequest) -> GoogleAuthResponse:
-    """
-    Verify Google OAuth token and authenticate user.
-    
-    Flow:
-    1. Frontend sends JWT token from Google Identity Services
-    2. Backend verifies token signature and audience
-    3. Extract user info (email, name, picture, sub)
-    4. Create/update user in Cosmos DB
-    5. Return safe user object
-    
-    Security:
-    - Token verification happens on server-side only
-    - GOOGLE_CLIENT_SECRET is never used (only CLIENT_ID needed for verification)
-    - GOOGLE_CLIENT_SECRET must be kept secure on server
-    """
+    """Verify a Google credential and create or update the Cosmos user document."""
     if not req.token or not req.token.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token er påkrevd"
-        )
-    
-    try:
-        # Verify the Google token
-        payload = await verify_google_token(req.token)
-        
-        # Extract user information from token
-        user_id = payload.get("sub")  # Google's unique user ID
-        email = payload.get("email")
-        first_name = payload.get("name", "Bonde")
-        picture = payload.get("picture")
-        
-        if not email:
-            raise ValueError("Email not in token")
-        
-        logger.info(f"Google auth successful for user: {email}")
-        
-        # Try to create/update user in Cosmos DB
-        try:
-            users_container = get_users_container()
-            
-            # Check if user exists
-            query = f"SELECT * FROM c WHERE c.email = '{email.lower()}'"
-            existing = list(users_container.query_items(query=query, enable_cross_partition_query=True))
-            
-            if existing:
-                # Update existing user with latest Google info
-                user_data = existing[0]
-                user_data["name"] = first_name
-                user_data["picture"] = picture
-                user_data["google_id"] = user_id
-                users_container.upsert_item(user_data)
-                logger.info(f"Updated existing user: {email}")
-            else:
-                # Create new user from Google profile
-                new_user = User(
-                    email=email.lower(),
-                    better_auth_id=f"google_{user_id}",
-                    first_name=first_name,
-                    last_name="",
-                    google_id=user_id
-                )
-                users_container.upsert_item(new_user.to_dict())
-                logger.info(f"Created new user from Google: {email}")
-                
-        except Exception as db_exc:
-            logger.warning(f"Cosmos DB error (non-critical): {db_exc}")
-            # Continue anyway - user can still authenticate even if DB fails
-        
-        # Return safe user object (never expose sensitive data)
-        return GoogleAuthResponse(
-            user_id=user_id,
-            email=email,
-            first_name=first_name,
-            picture=picture,
-            message="Innlogget med Google"
-        )
-        
-    except ValueError as val_exc:
-        logger.warning(f"Google token verification failed: {val_exc}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Ugyldig Google-token: {str(val_exc)}"
-        )
-    except Exception as exc:
-        logger.error(f"Google auth error: {exc}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Google autentisering feilet: {str(exc)}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token er påkrevd.")
 
+    try:
+        payload = await verify_google_token(req.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    google_id = str(payload.get("sub") or "")
+    email = str(payload.get("email") or "").lower()
+    first_name = str(payload.get("given_name") or payload.get("name") or "Bonde")
+    last_name = str(payload.get("family_name") or "")
+    picture = payload.get("picture")
+    if not google_id or not email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google-tokenet mangler brukeridentitet.")
+
+    try:
+        users_container = get_users_container()
+        query = f"SELECT * FROM c WHERE c.email = '{email}'"
+        existing = list(users_container.query_items(query=query, enable_cross_partition_query=True))
+        if existing:
+            user_data = existing[0]
+            user_data.update(
+                {
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "picture": picture,
+                    "google_id": google_id,
+                }
+            )
+            users_container.upsert_item(user_data)
+            user_id = str(user_data["id"])
+        else:
+            user = User(
+                email=email,
+                better_auth_id=f"google_{google_id}",
+                first_name=first_name,
+                last_name=last_name,
+                google_id=google_id,
+            )
+            user_data = user.to_dict()
+            if picture:
+                user_data["picture"] = picture
+            users_container.upsert_item(user_data)
+            user_id = user.id
+    except Exception as exc:
+        logger.error("Could not persist Google user: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google-innlogging lyktes, men brukeren kunne ikke lagres. Prøv igjen.",
+        ) from exc
+
+    return GoogleAuthResponse(
+        user_id=user_id,
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        picture=str(picture) if picture else None,
+        message="Innlogget med Google.",
+    )

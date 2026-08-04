@@ -25,6 +25,7 @@ class User:
         better_auth_id: str,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
+        google_id: Optional[str] = None,
         is_active: bool = True,
         id: Optional[str] = None,
         created_at: Optional[datetime] = None
@@ -34,6 +35,7 @@ class User:
         self.better_auth_id = better_auth_id  # Partition key
         self.first_name = first_name
         self.last_name = last_name
+        self.google_id = google_id
         self.is_active = is_active
         self.created_at = created_at or datetime.utcnow()
         self.type = "user"  # Document type discriminator
@@ -47,6 +49,7 @@ class User:
             "better_auth_id": self.better_auth_id,
             "first_name": self.first_name,
             "last_name": self.last_name,
+            "google_id": self.google_id,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
         }
@@ -60,6 +63,7 @@ class User:
             better_auth_id=data.get("better_auth_id"),
             first_name=data.get("first_name"),
             last_name=data.get("last_name"),
+            google_id=data.get("google_id"),
             is_active=data.get("is_active", True),
             created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None
         )

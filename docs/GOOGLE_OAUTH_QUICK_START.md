@@ -9,7 +9,7 @@
 - [ ] Add redirect URIs:
   - `http://localhost:3000`
   - `http://localhost:8000`
-  - `https://your-production-domain.com`
+  - `https://salmon-ocean-076260203.7.azurestaticapps.net`
 - [ ] Copy **Client ID** and **Client Secret**
 
 ### 2️⃣ Backend Environment
@@ -29,6 +29,8 @@ Create `frontend/.env.local`:
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=YOUR_CLIENT_ID_HERE
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
+
+I produksjon henter den statisk eksporterte frontend-en Google Client ID fra backend ved kjøretid. Sett derfor `GOOGLE_CLIENT_ID` på Azure Function App. Google Cloud-klienten må også tillate JavaScript-originen `https://salmon-ocean-076260203.7.azurestaticapps.net`.
 
 ### 4️⃣ Install Dependencies
 

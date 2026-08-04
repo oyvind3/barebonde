@@ -7,6 +7,8 @@ import axios from 'axios'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Button } from '@/components/ui/Button'
 import { CompanySearch, Company } from '@/components/ui/CompanySearch'
+import { GoogleLoginButton, GoogleUser } from '@/components/auth/GoogleLoginButton'
+import { API_BASE_URL } from '@/lib/api'
 
 export default function FarmSetupPage() {
   const router = useRouter()
@@ -30,6 +32,8 @@ export default function FarmSetupPage() {
   // Payment choice state (Faktura / Vipps)
   const [paymentMethod, setPaymentMethod] = useState<'faktura' | 'vipps'>('faktura')
   const [fakturaEpost, setFakturaEpost] = useState('')
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null)
+  const [emailStatus, setEmailStatus] = useState<{ sent: boolean; message: string } | null>(null)
 
   const [loading, setLoading] = useState(false)
   const [resendLoading, setResendLoading] = useState(false)
@@ -45,25 +49,27 @@ export default function FarmSetupPage() {
     }
   }
 
-  const handleGoogleSignup = () => {
-    alert('Google OAuth innlogging er klargjort! Sender deg videre for å legge til gård...')
-    router.push('/dashboard')
+  const handleGoogleSignup = (user: GoogleUser) => {
+    setGoogleUser(user)
+    setFirstName(user.first_name)
+    setLastName(user.last_name)
+    setEmail(user.email)
+    setPassword('')
+    setConfirmPassword('')
+    setError(null)
   }
 
   const handleResendEmail = async () => {
     setResendLoading(true)
     setResendMessage(null)
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL
-      if (backendUrl) {
-        await axios.post(`${backendUrl}/api/auth/resend-confirmation`, {
-          email: email,
-          first_name: firstName || 'Bonde',
-        })
-      }
-      setResendMessage(`Ny bekreftelses-e-post er nå sendt til ${email}! Sjekk innboksen din.`)
-    } catch (err) {
-      setResendMessage(`Sendt på nytt til ${email}! Sjekk innboksen eller søppelpost-mappen.`)
+      const response = await axios.post(`${API_BASE_URL}/api/auth/resend-confirmation`, {
+        email,
+        first_name: firstName || 'Bonde',
+      })
+      setResendMessage(response.data.message || `Ny bekreftelses-e-post er sendt til ${email}.`)
+    } catch (err: any) {
+      setResendMessage(err.response?.data?.detail || 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
     } finally {
       setResendLoading(false)
     }
@@ -73,17 +79,17 @@ export default function FarmSetupPage() {
     e.preventDefault()
     setError(null)
 
-    if (!firstName.trim() || !lastName.trim() || !email.trim() || !password) {
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || (!googleUser && !password)) {
       setError('Vennligst fyll ut fornavn, etternavn, e-postadresse og passord.')
       return
     }
 
-    if (password !== confirmPassword) {
+    if (!googleUser && password !== confirmPassword) {
       setError('Passordene er ikke like. Vennligst sjekk at du har skrevet riktig passord i begge feltene.')
       return
     }
 
-    if (password.length < 6) {
+    if (!googleUser && password.length < 6) {
       setError('Passordet må bestå av minst 6 tegn.')
       return
     }
@@ -103,11 +109,10 @@ export default function FarmSetupPage() {
     setError(null)
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL
+      let onboardingUserId = googleUser?.user_id
 
-      if (backendUrl) {
-        try {
-          await axios.post(`${backendUrl}/api/auth/register`, {
+      if (!googleUser) {
+        const registration = await axios.post(`${API_BASE_URL}/api/auth/register`, {
             first_name: firstName,
             last_name: lastName,
             email: email,
@@ -115,27 +120,34 @@ export default function FarmSetupPage() {
             address: address,
             farm_name: isManualMode ? farmName : (selectedCompany?.name || farmName),
             org_number: isManualMode ? orgNumber : (selectedCompany?.org_number || orgNumber),
-          })
-        } catch (regErr) {
-          console.warn('Backend registration warning:', regErr)
-        }
-
-        try {
-          await axios.post(`${backendUrl}/api/farms`, {
-            name: isManualMode ? farmName : (selectedCompany?.name || farmName),
-            org_number: (isManualMode ? orgNumber : selectedCompany?.org_number) || '000000000',
-            address: address || selectedCompany?.address || '',
-            municipality: selectedCompany?.municipality || '',
-          })
-        } catch (farmErr) {
-          console.warn('Backend farm creation warning:', farmErr)
-        }
+        })
+        onboardingUserId = registration.data.user_id
+        setEmailStatus({
+          sent: Boolean(registration.data.email_sent),
+          message: registration.data.email_message || registration.data.message,
+        })
       }
+
+      if (onboardingUserId) {
+        window.localStorage.setItem('barebonde_onboarding_user_id', onboardingUserId)
+      }
+
+      const farmResponse = await axios.post(
+        `${API_BASE_URL}/api/farms`,
+        {
+          name: isManualMode ? farmName : (selectedCompany?.name || farmName),
+          org_number: (isManualMode ? orgNumber : selectedCompany?.org_number) || '000000000',
+          address: address || selectedCompany?.address || '',
+          municipality: selectedCompany?.municipality || '',
+        },
+        { headers: onboardingUserId ? { 'X-Onboarding-User-Id': onboardingUserId } : undefined },
+      )
+      window.localStorage.setItem('barebonde_active_farm_id', farmResponse.data.id)
 
       setStep('confirmation')
     } catch (err: any) {
       console.error('Registration error:', err)
-      setStep('confirmation')
+      setError(err.response?.data?.detail || 'Kunne ikke fullføre registreringen. Prøv igjen.')
     } finally {
       setLoading(false)
     }
@@ -179,31 +191,17 @@ export default function FarmSetupPage() {
               <form onSubmit={handleNextToPayment} className="space-y-6">
                 {/* Fast Google Signup */}
                 <div className="mb-6">
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignup}
-                    className="w-full flex items-center justify-center gap-3 bg-white border border-stone-300 hover:border-stone-400 text-stone-700 font-semibold text-sm py-3 px-4 rounded-xl shadow-xs transition"
-                  >
-                    <svg className="w-5 h-5" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                      />
-                    </svg>
-                    Fortsett med Google
-                  </button>
+                  {googleUser ? (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                      Innlogget med Google som <strong>{googleUser.email}</strong>. Fullfør gårdsoppsettet under.
+                    </div>
+                  ) : (
+                    <GoogleLoginButton
+                      onSuccess={handleGoogleSignup}
+                      onError={(message) => setError(message)}
+                      redirectTo={null}
+                    />
+                  )}
 
                   <div className="relative my-6 text-center">
                     <div className="absolute inset-0 flex items-center">
@@ -274,7 +272,8 @@ export default function FarmSetupPage() {
                         type="password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        required
+                        required={!googleUser}
+                        disabled={Boolean(googleUser)}
                         placeholder="••••••••"
                         className="w-full px-4 py-2.5 border border-stone-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-bonde-green outline-none"
                       />
@@ -288,7 +287,8 @@ export default function FarmSetupPage() {
                         type="password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        required
+                        required={!googleUser}
+                        disabled={Boolean(googleUser)}
                         placeholder="••••••••"
                         className="w-full px-4 py-2.5 border border-stone-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-bonde-green outline-none"
                       />
@@ -488,21 +488,30 @@ export default function FarmSetupPage() {
                     Takk for din registrering, {firstName}!
                   </h2>
                   <p className="text-stone-600 text-sm max-w-md mx-auto">
-                    Vi har sendt en bekreftelses-e-post til <strong className="text-stone-900">{email}</strong>.
+                    {googleUser
+                      ? 'Google-kontoen din er koblet til gårdsoppsettet.'
+                      : emailStatus?.sent
+                      ? <>Vi har sendt en bekreftelses-e-post til <strong className="text-stone-900">{email}</strong>.</>
+                      : 'Kontoen er opprettet, men vi klarte ikke å sende bekreftelses-e-posten.'}
                   </p>
                 </div>
 
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-900 max-w-md mx-auto text-left">
+                <div className={`${emailStatus?.sent === false ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900'} border rounded-xl p-4 text-xs max-w-md mx-auto text-left`}>
                   <p className="font-bold mb-1">Hva skjer nå?</p>
-                  <ol className="list-decimal list-inside space-y-1 text-emerald-800">
-                    <li>Åpne innboksen for e-postadressen <span className="font-semibold">{email}</span>.</li>
-                    <li>Klikk på bekreftelseslenken i e-posten.</li>
-                    <li>Gården din (<span className="font-semibold">{selectedCompany?.name || farmName || 'Din gård'}</span>) vil da bli aktivert.</li>
-                  </ol>
+                  {googleUser ? (
+                    <p>Gården <span className="font-semibold">{selectedCompany?.name || farmName || 'din gård'}</span> er nå klar i kontrollpanelet.</p>
+                  ) : emailStatus?.sent ? (
+                    <ol className="list-decimal list-inside space-y-1 text-emerald-800">
+                      <li>Åpne innboksen for e-postadressen <span className="font-semibold">{email}</span>.</li>
+                      <li>Følg lenken i e-posten for å åpne Barebonde.</li>
+                    </ol>
+                  ) : (
+                    <p>{emailStatus?.message || 'Du kan prøve å sende e-posten på nytt når e-posttjenesten er konfigurert.'}</p>
+                  )}
                 </div>
 
                 {/* Mottok du ikke e-post? Send på nytt knapp */}
-                <div className="pt-2 max-w-md mx-auto space-y-3">
+                {!googleUser && <div className="pt-2 max-w-md mx-auto space-y-3">
                   {resendMessage && (
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs">
                       {resendMessage}
@@ -521,7 +530,7 @@ export default function FarmSetupPage() {
                   >
                     {resendLoading ? 'Sender på nytt...' : '📩 Mottok du ikke e-post? Send på nytt'}
                   </button>
-                </div>
+                </div>}
 
                 <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
                   <Button

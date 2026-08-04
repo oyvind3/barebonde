@@ -40,7 +40,11 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"  # Frontend base URL for redirects
     
     # CORS
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:3001"]
+    cors_origins: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://salmon-ocean-076260203.7.azurestaticapps.net",
+    ]
     
     class Config:
         env_file = ".env"
