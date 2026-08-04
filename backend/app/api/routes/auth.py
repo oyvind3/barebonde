@@ -188,12 +188,20 @@ def _clear_session_cookie(response: Response) -> None:
     )
 
 
-async def _send_confirmation_email(email: str, first_name: str, *, is_resend: bool = False) -> None:
+async def _send_confirmation_email(
+    email: str,
+    first_name: str,
+    *,
+    is_resend: bool = False,
+    registration_profile: Optional[dict[str, Any]] = None,
+) -> None:
     """Send the onboarding e-mail link used to verify the address."""
     # Fail before creating a reusable challenge if delivery is not configured.
     _get_plunk_config()
     safe_name = html.escape(first_name or "Bonde")
-    raw_token = ChallengeService().create_email_login_challenge(email=email, first_name=first_name)
+    raw_token = ChallengeService().create_email_registration_challenge(
+        email=email, registration_profile=registration_profile
+    )
     action = "Du ba om en ny bekreftelseslenke." if is_resend else "Takk for at du oppretter konto hos Barebonde."
     await _send_plunk_email(
         to=email,
@@ -255,10 +263,10 @@ async def resend_confirmation_email(req: MagicLinkRequest) -> dict[str, str]:
 
 @router.post("/register")
 async def register_user(req: RegisterRequest) -> AuthResponse:
-    """Persist a profile during the existing multi-step farm onboarding.
+    """Legacy farm-setup entry point that starts registration only.
 
-    This route collects the profile, then sends the one-time e-mail link that
-    verifies the address and starts the server-managed session.
+    It keeps the established response contract while making verification the
+    first point at which a User document can be created.
     """
     email = str(req.email).lower()
     first_name = req.first_name.strip()
@@ -267,51 +275,46 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
     onboarding_role = (req.onboarding_role or "").strip() or None
 
     try:
-        identity_service = IdentityService()
-        user_data = identity_service.resolve_email_identity(email=email, first_name=first_name)
-        user_data = _upsert_existing_user(
-            identity_service.users,
-            user_data,
-            email=email,
-            first_name=first_name,
-            last_name=last_name,
-            phone_number=req.phone_number,
-            address=address,
-            onboarding_role=onboarding_role,
+        await _send_confirmation_email(
+            email,
+            first_name or "Bonde",
+            registration_profile={
+                "first_name": first_name,
+                "last_name": last_name,
+                "phone_number": req.phone_number,
+                "address": address,
+                "onboarding_role": onboarding_role,
+            },
         )
-    except (IdentityConflictError, DisabledUserError) as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.error("Failed saving onboarding user: %s", exc)
+    except IdentityError as exc:
+        if str(exc) == "account_already_exists":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="account_already_exists") from exc
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Kunne ikke opprette brukeren akkurat nå. Prøv igjen.",
+            detail="Kunne ikke kontrollere kontoen akkurat nå.",
         ) from exc
-
-    try:
-        await _send_confirmation_email(email, first_name or "Bonde")
     except EmailDeliveryError as exc:
         logger.warning("Registration email was not sent: %s", exc)
         return AuthResponse(
-            user_id=str(user_data["id"]),
+            user_id="",
             email=email,
             first_name=first_name,
             last_name=last_name,
             phone_number=req.phone_number,
             email_sent=False,
             email_message=str(exc),
-            message="Kontoen er opprettet, men bekreftelses-e-posten kunne ikke sendes.",
+            message="Kontoen er ikke opprettet fordi bekreftelses-e-posten ikke kunne sendes.",
         )
 
     return AuthResponse(
-        user_id=str(user_data["id"]),
+        user_id="",
         email=email,
         first_name=first_name,
         last_name=last_name,
         phone_number=req.phone_number,
         email_sent=True,
         email_message="Bekreftelses-e-post er sendt.",
-        message="Bruker opprettet. Sjekk e-posten din for videre instruksjoner.",
+        message="Bekreft e-postadressen for å opprette brukeren.",
     )
 
 
@@ -336,9 +339,47 @@ async def send_magic_link(req: MagicLinkRequest) -> dict[str, str]:
         )
     except (EmailDeliveryError, IdentitySecurityConfigurationError, IdentityError) as exc:
         logger.warning("Magic-link email was not sent: %s", exc)
+        if isinstance(exc, IdentityError) and str(exc) == "account_not_found":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account_not_found") from exc
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     return {"status": "ok", "message": "Innloggingslenke sendt på e-post."}
+
+
+@router.post("/email/request")
+async def request_login_email(req: MagicLinkRequest) -> dict[str, str]:
+    """Send a login link only for an already registered identity."""
+    try:
+        _get_plunk_config()
+        raw_token = ChallengeService().create_email_login_challenge(email=str(req.email))
+    except IdentityError as exc:
+        if str(exc) == "account_not_found":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account_not_found") from exc
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke kontrollere kontoen akkurat nå.") from exc
+    try:
+        await _send_plunk_email(to=str(req.email), subject="Din innloggingslenke til Barebonde", body=f"<p><a href='{_frontend_url()}/login?token={raw_token}'>Logg inn i Barebonde</a></p>")
+    except EmailDeliveryError as exc:
+        logger.warning("Login email was not sent: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke sende e-post akkurat nå.") from exc
+    return {"status": "ok", "message": "Innloggingslenke sendt på e-post."}
+
+
+@router.post("/register/email/request")
+async def request_registration_email(req: MagicLinkRequest) -> dict[str, str]:
+    """Start explicit registration without creating a User before verification."""
+    try:
+        _get_plunk_config()
+        raw_token = ChallengeService().create_email_registration_challenge(email=str(req.email))
+    except IdentityError as exc:
+        if str(exc) == "account_already_exists":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="account_already_exists") from exc
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke kontrollere kontoen akkurat nå.") from exc
+    try:
+        await _send_plunk_email(to=str(req.email), subject="Bekreft og opprett Barebonde-konto", body=f"<p><a href='{_frontend_url()}/login?token={raw_token}&flow=register'>Bekreft e-postadressen</a></p>")
+    except EmailDeliveryError as exc:
+        logger.warning("Registration email was not sent: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kunne ikke sende e-post akkurat nå.") from exc
+    return {"status": "ok", "message": "Vi har sendt en lenke for å bekrefte e-postadressen og opprette kontoen."}
 
 
 @router.post("/magic-link/verify", response_model=AuthenticatedResponse)
@@ -347,7 +388,7 @@ async def verify_magic_link(req: MagicLinkVerifyRequest, response: Response) -> 
     if not req.token or not req.token.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Innloggingslenke mangler.")
     try:
-        user = ChallengeService().consume_email_login_challenge(req.token)
+        user = ChallengeService().consume_email_challenge(req.token)
         raw_session_token, session = SessionService().create_session(user)
     except InvalidChallengeError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc

@@ -9,7 +9,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 os.environ.setdefault("IDENTITY_HMAC_KEY", "test-identity-hmac-key")
 
 from app.services.challenge_service import ChallengeService, InvalidChallengeError
-from app.services.identity_service import DisabledUserError, IdentityService
+from app.services.identity_service import DisabledUserError, IdentityError, IdentityService
 from app.services.session_service import InvalidSessionError, SessionService
 
 
@@ -77,6 +77,7 @@ def test_email_challenge_is_opaque_expires_and_can_only_be_consumed_once():
     challenges = MemoryContainer()
     service = ChallengeService(challenges_container=challenges, identity_service=identity)
 
+    identity.resolve_email_identity(email="ola@example.com", first_name="Ola")
     token = service.create_email_login_challenge(email="ola@example.com", first_name="Ola")
     challenge = next(iter(challenges.items.values()))
     assert token not in str(challenge)
@@ -87,12 +88,35 @@ def test_email_challenge_is_opaque_expires_and_can_only_be_consumed_once():
     with pytest.raises(InvalidChallengeError):
         service.consume_email_login_challenge(token)
 
+    identity.resolve_email_identity(email="kari@example.com")
     expired_token = service.create_email_login_challenge(email="kari@example.com")
     expired = next(item for item in challenges.items.values() if not item.get("consumed_at"))
     expired["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     challenges.upsert_item(expired)
     with pytest.raises(InvalidChallengeError):
         service.consume_email_login_challenge(expired_token)
+
+
+def test_login_lookup_does_not_create_a_user_but_registration_waits_for_verification():
+    identity = identity_service()
+    challenges = MemoryContainer()
+    service = ChallengeService(challenges_container=challenges, identity_service=identity)
+
+    with pytest.raises(IdentityError, match="account_not_found"):
+        service.create_email_login_challenge(email="ny@example.com")
+    assert identity.users.items == {}
+
+    token = service.create_email_registration_challenge(
+        email="ny@example.com",
+        registration_profile={"first_name": "Ny", "last_name": "Bonde", "phone_number": "+4791234567"},
+    )
+    assert identity.users.items == {}
+    user = service.consume_email_challenge(token)
+
+    assert user["email"] == "ny@example.com"
+    assert user["last_name"] == "Bonde"
+    assert user["phone_number"] == "+4791234567"
+    assert user["email_verified"] is True
 
 
 def test_session_persists_only_a_digest_and_revocation_invalidates_it():

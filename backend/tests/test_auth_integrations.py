@@ -102,7 +102,7 @@ def test_onboarding_confirmation_link_returns_to_farm_setup(monkeypatch):
     sent = []
 
     class FakeChallengeService:
-        def create_email_login_challenge(self, **_):
+        def create_email_registration_challenge(self, **_):
             return "one-time-token"
 
     async def fake_send(**kwargs):
@@ -117,24 +117,13 @@ def test_onboarding_confirmation_link_returns_to_farm_setup(monkeypatch):
     assert "https://barebonde.no/farm/setup?token=one-time-token" in sent[0]["body"]
 
 
-def test_passwordless_onboarding_profile_keeps_phone_number_without_accepting_a_password(monkeypatch):
-    stored = []
+def test_legacy_registration_entry_does_not_create_a_user_before_verification(monkeypatch):
+    sent = []
 
-    class UsersContainer:
-        def upsert_item(self, item):
-            stored.append(dict(item))
+    async def send_registration_link(*args, **_):
+        sent.append(args)
 
-    class FakeIdentityService:
-        users = UsersContainer()
-
-        def resolve_email_identity(self, **_):
-            return user_document()
-
-    async def send_login_link(*_, **__):
-        return None
-
-    monkeypatch.setattr(auth, "IdentityService", FakeIdentityService)
-    monkeypatch.setattr(auth, "_send_confirmation_email", send_login_link)
+    monkeypatch.setattr(auth, "_send_confirmation_email", send_registration_link)
 
     response = make_client().post(
         "/register",
@@ -148,13 +137,13 @@ def test_passwordless_onboarding_profile_keeps_phone_number_without_accepting_a_
 
     assert response.status_code == 200
     assert response.json()["email_sent"] is True
-    assert stored[0]["phone_number"] == "+4791234567"
-    assert stored[0]["email_normalized"] == "ola@example.com"
+    assert response.json()["user_id"] == ""
+    assert sent == [("ola@example.com", "Ola")]
 
 
 def test_magic_link_verify_sets_cookie_after_single_use_challenge(monkeypatch):
     class FakeChallengeService:
-        def consume_email_login_challenge(self, token):
+        def consume_email_challenge(self, token):
             assert token == "magic-link-token"
             return user_document()
 
@@ -173,6 +162,42 @@ def test_magic_link_verify_sets_cookie_after_single_use_challenge(monkeypatch):
     assert response.status_code == 200
     assert response.json()["message"].startswith("Innlogging")
     assert "httponly" in response.headers["set-cookie"].lower()
+
+
+def test_login_request_returns_account_not_found_without_sending_email(monkeypatch):
+    class FakeChallengeService:
+        def create_email_login_challenge(self, **_):
+            raise auth.IdentityError("account_not_found")
+
+    monkeypatch.setattr(auth, "ChallengeService", FakeChallengeService)
+    monkeypatch.setattr(auth, "_get_plunk_config", lambda: ("sk_test", "post@example.com", "Barebonde", None, "url"))
+
+    response = make_client().post("/email/request", json={"email": "ny@example.com"})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "account_not_found"
+
+
+def test_registration_request_creates_only_a_registration_challenge(monkeypatch):
+    calls = []
+
+    class FakeChallengeService:
+        def create_email_registration_challenge(self, **kwargs):
+            calls.append(kwargs)
+            return "registration-token"
+
+    async def fake_send(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(auth, "ChallengeService", FakeChallengeService)
+    monkeypatch.setattr(auth, "_get_plunk_config", lambda: ("sk_test", "post@example.com", "Barebonde", None, "url"))
+    monkeypatch.setattr(auth, "_send_plunk_email", fake_send)
+
+    response = make_client().post("/register/email/request", json={"email": "ny@example.com"})
+
+    assert response.status_code == 200
+    assert calls[0] == {"email": "ny@example.com"}
+    assert "registration-token" in calls[1]["body"]
 
 
 def test_me_is_limited_to_identity_and_session_data(monkeypatch):

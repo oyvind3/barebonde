@@ -189,6 +189,10 @@ class IdentityService:
             )
         return user
 
+    def find_existing_email_identity(self, email: str) -> dict[str, Any] | None:
+        """Lookup-only path for login; it never claims or creates identity data."""
+        return self._find_by_email(normalize_email(email))
+
     def _new_user(self, *, email: str, first_name: str = "Bonde", last_name: str = "") -> dict[str, Any]:
         user_id = str(uuid4())
         user = User(

@@ -268,13 +268,22 @@ export default function FarmSetupPage() {
     setResendLoading(true)
     setResendMessage(null)
     try {
-      const response = await apiFetch('/api/auth/resend-confirmation', {
+      // Re-submit the pending registration rather than issuing a bare resend,
+      // so a replacement one-time link retains the profile until verification.
+      const response = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, first_name: firstName || 'Bonde' }),
+        body: JSON.stringify({
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          email: email.trim(),
+          phone_number: phoneNumber.trim(),
+          address: personalAddress.trim() || undefined,
+          onboarding_role: onboardingRole,
+        }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.detail || 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
+      if (!response.ok || !data.email_sent) throw new Error(data.detail || data.email_message || 'Kunne ikke sende e-post på nytt. Prøv igjen senere.')
       setResendMessage(data.message || `Ny bekreftelseslenke er sendt til ${email}.`)
     } catch (requestError) {
       setResendMessage(requestError instanceof Error ? requestError.message : 'Kunne ikke sende bekreftelseslenken på nytt. Prøv igjen senere.')

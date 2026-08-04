@@ -31,7 +31,19 @@ class ChallengeService:
         self.identity = identity_service or IdentityService()
 
     def create_email_login_challenge(self, *, email: str, first_name: str = "Bonde") -> str:
-        user = self.identity.resolve_email_identity(email=email, first_name=first_name)
+        user = self.identity.find_existing_email_identity(email)
+        if user is None:
+            raise IdentityError("account_not_found")
+        return self._create_challenge(challenge_type="email_login", user=user)
+
+    def _create_challenge(
+        self,
+        *,
+        challenge_type: str,
+        user: dict[str, Any] | None = None,
+        email: str | None = None,
+        registration_profile: dict[str, Any] | None = None,
+    ) -> str:
         raw_token = new_opaque_token()
         challenge_id = challenge_identifier(raw_token)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.identity_magic_link_ttl_seconds)
@@ -40,9 +52,11 @@ class ChallengeService:
                 "id": challenge_id,
                 "type": "auth_challenge",
                 "challenge_partition_id": challenge_id,
-                "challenge_type": "email_login",
-                "user_id": user["user_id"],
-                "user_partition_key": self.identity.user_partition_key(user),
+                "challenge_type": challenge_type,
+                "user_id": user["user_id"] if user else None,
+                "user_partition_key": self.identity.user_partition_key(user) if user else None,
+                "registration_email": email,
+                "registration_profile": registration_profile,
                 "created_at": utc_now(),
                 "expires_at": expires_at.isoformat(),
                 "consumed_at": None,
@@ -50,7 +64,22 @@ class ChallengeService:
         )
         return raw_token
 
+    def create_email_registration_challenge(
+        self, *, email: str, registration_profile: dict[str, Any] | None = None
+    ) -> str:
+        normalized = email.strip().casefold()
+        if self.identity.find_existing_email_identity(normalized) is not None:
+            raise IdentityError("account_already_exists")
+        return self._create_challenge(
+            challenge_type="email_registration",
+            email=normalized,
+            registration_profile=registration_profile,
+        )
+
     def consume_email_login_challenge(self, raw_token: str) -> dict[str, Any]:
+        return self.consume_email_challenge(raw_token, expected_type="email_login")
+
+    def consume_email_challenge(self, raw_token: str, *, expected_type: str | None = None) -> dict[str, Any]:
         challenge_id = challenge_identifier(raw_token)
         try:
             challenge = self.challenges.read_item(item=challenge_id, partition_key=challenge_id)
@@ -58,7 +87,7 @@ class ChallengeService:
             raise InvalidChallengeError("Innloggingslenken er ugyldig eller er allerede brukt.") from exc
 
         expires_at = _parse_time(challenge.get("expires_at"))
-        if challenge.get("challenge_type") != "email_login" or challenge.get("consumed_at") or not expires_at or expires_at <= datetime.now(timezone.utc):
+        if (expected_type and challenge.get("challenge_type") != expected_type) or challenge.get("challenge_type") not in {"email_login", "email_registration"} or challenge.get("consumed_at") or not expires_at or expires_at <= datetime.now(timezone.utc):
             raise InvalidChallengeError("Innloggingslenken er utløpt eller allerede brukt.")
 
         challenge["consumed_at"] = utc_now()
@@ -71,4 +100,19 @@ class ChallengeService:
             )
         except (exceptions.CosmosHttpResponseError, exceptions.CosmosResourceNotFoundError) as exc:
             raise InvalidChallengeError("Innloggingslenken er allerede brukt.") from exc
-        return self.identity.get_user(challenge["user_id"], challenge["user_partition_key"])
+        if challenge.get("challenge_type") == "email_registration":
+            profile = challenge.get("registration_profile") or {}
+            user = self.identity.resolve_email_identity(
+                email=str(challenge.get("registration_email") or ""),
+                first_name=str(profile.get("first_name") or "Bonde"),
+            )
+            allowed_profile_fields = {"first_name", "last_name", "phone_number", "address", "onboarding_role"}
+            profile_updates = {key: value for key, value in profile.items() if key in allowed_profile_fields and value is not None}
+            if profile_updates:
+                user = self.identity.update_profile(user, profile_updates)
+        else:
+            user = self.identity.get_user(challenge["user_id"], challenge["user_partition_key"])
+
+        # Completing a one-time e-mail challenge is the verification event for
+        # both login and registration.  Persist it before starting a session.
+        return self.identity.update_profile(user, {"email_verified": True})
