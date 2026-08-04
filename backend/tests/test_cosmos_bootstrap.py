@@ -74,7 +74,7 @@ def patch_cosmos_exceptions(monkeypatch):
 def test_schema_has_unique_containers_and_declares_the_new_identity_resources():
     names = [definition.name for definition in CONTAINER_DEFINITIONS]
 
-    assert len(names) == len(set(names)) == 15
+    assert len(names) == len(set(names)) == 16
     assert "subscription_usage" not in names
     assert {definition.name: definition.partition_key for definition in CONTAINER_DEFINITIONS if definition.name in {
         "auth_sessions": "/session_partition_id",
@@ -83,6 +83,7 @@ def test_schema_has_unique_containers_and_declares_the_new_identity_resources():
         "subscriptions": "/farm_id",
         "farm_settings": "/farm_id",
         "bank_accounts": "/farm_id",
+        "farm_invitations": "/farm_id",
     }} == {
         "auth_sessions": "/session_partition_id",
         "auth_challenges": "/challenge_partition_id",
@@ -90,6 +91,7 @@ def test_schema_has_unique_containers_and_declares_the_new_identity_resources():
         "subscriptions": "/farm_id",
         "farm_settings": "/farm_id",
         "bank_accounts": "/farm_id",
+        "farm_invitations": "/farm_id",
     }
 
 
