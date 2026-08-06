@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { apiErrorMessage, apiFetch, bootstrapIdentity, IdentityBootstrap } from '@/lib/api'
-import { ProgressTracker, OnboardingStep, InterestsSelector, Summary } from '@/components/onboarding'
+import { OnboardingStep, InterestsSelector, Summary } from '@/components/onboarding'
 import Link from 'next/link'
 
 interface State {

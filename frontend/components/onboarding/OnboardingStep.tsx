@@ -9,6 +9,7 @@ interface OnboardingStepProps {
   href?: string
   linkText?: string
   children?: React.ReactNode
+  optional?: boolean
 }
 
 export function OnboardingStep({ 
@@ -18,7 +19,8 @@ export function OnboardingStep({
   isCompleted, 
   href, 
   linkText,
-  children 
+  children,
+  optional 
 }: OnboardingStepProps) {
   return (
     <section className="border-b border-gray-100 pb-4 last:border-0">
@@ -30,7 +32,7 @@ export function OnboardingStep({
               ? 'bg-bonde-green text-white' 
               : 'bg-gray-200 text-gray-600'
           }`}
-          aria-label={`Steg ${stepNumber}: ${isCompleted ? 'fullført' : 'gjenstår'}`}
+          aria-label={`Steg ${stepNumber}: ${isCompleted ? 'fullført' : 'gjenstår'}${optional ? ' (valgfritt)' : ''}`}
         >
           {isCompleted ? (
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -45,6 +47,9 @@ export function OnboardingStep({
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold text-gray-900">
             {title}
+            {optional && (
+              <span className="ml-2 text-xs font-normal text-gray-500">(valgfritt)</span>
+            )}
             {isCompleted && (
               <span className="ml-2 text-xs font-normal text-bonde-green">✓ Fullført</span>
             )}
