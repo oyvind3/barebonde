@@ -97,3 +97,24 @@ class SessionService:
             session["revoked_at"] = utc_now()
             self.sessions.upsert_item(session)
         return True
+
+    def revoke_other_sessions(self, *, user: dict[str, Any], keep_session_id: str) -> int:
+        """Revoke all sessions for a user except the specified one.
+        
+        Returns the count of revoked sessions.
+        """
+        current_id = session_identifier(keep_session_id) if len(keep_session_id) > 32 else keep_session_id
+        sessions = list(
+            self.sessions.query_items(
+                query="SELECT * FROM c WHERE c.user_id = @user_id",
+                parameters=[{"name": "@user_id", "value": user["user_id"]}],
+                enable_cross_partition_query=True,
+            )
+        )
+        revoked_count = 0
+        for session in sessions:
+            if session["id"] != current_id and not session.get("revoked_at"):
+                session["revoked_at"] = utc_now()
+                self.sessions.upsert_item(session)
+                revoked_count += 1
+        return revoked_count
