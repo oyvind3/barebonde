@@ -7,14 +7,23 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
-from fastapi import FastAPI, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
+
+# Trusted proxy IP ranges (Azure infrastructure)
+# In production, configure this based on your load balancer/CDN IPs
+TRUSTED_PROXIES: Set[str] = {
+    "10.0.0.0/8",  # Private network
+    "172.16.0.0/12",  # Private network
+    "192.168.0.0/16",  # Private network
+    "127.0.0.1",  # Localhost
+}
 
 
 @dataclass
@@ -99,12 +108,80 @@ RATE_LIMITS = {
 }
 
 
+def _is_trusted_proxy(ip: str) -> bool:
+    """Check if an IP is from a trusted proxy range.
+    
+    Args:
+        ip: The IP address to check
+        
+    Returns:
+        True if the IP is from a trusted proxy, False otherwise
+    """
+    import ipaddress
+    
+    try:
+        client_ip = ipaddress.ip_address(ip)
+        for proxy_range in TRUSTED_PROXIES:
+            if "/" in proxy_range:
+                network = ipaddress.ip_network(proxy_range, strict=False)
+                if client_ip in network:
+                    return True
+            else:
+                if client_ip == ipaddress.ip_address(proxy_range):
+                    return True
+        return False
+    except ValueError:
+        # Invalid IP address
+        return False
+
+
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP from request, considering proxies."""
+    """Extract client IP from request, considering proxies with trust boundary.
+    
+    This function safely extracts the real client IP when behind load balancers
+    or CDNs by only trusting X-Forwarded-For headers from trusted proxies.
+    
+    Args:
+        request: The incoming HTTP request
+        
+    Returns:
+        The client's real IP address
+    """
+    # Get the direct connection IP
+    direct_ip = request.client.host if request.client else "unknown"
+    
+    # Check if the direct connection is from a trusted proxy
+    if not _is_trusted_proxy(direct_ip):
+        # Not from a trusted proxy, use direct IP only
+        # This prevents clients from spoofing their IP via headers
+        return direct_ip
+    
+    # From a trusted proxy, check X-Forwarded-For header
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+        # X-Forwarded-For format: client, proxy1, proxy2, ...
+        # Take the first (leftmost) IP which is the original client
+        ips = [ip.strip() for ip in forwarded.split(",")]
+        if ips:
+            client_ip = ips[0]
+            # Validate it's a proper IP address
+            try:
+                ipaddress.ip_address(client_ip)
+                return client_ip
+            except ValueError:
+                logger.warning(f"Invalid IP in X-Forwarded-For: {client_ip}")
+    
+    # Fall back to X-Real-IP if available
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        try:
+            ipaddress.ip_address(real_ip)
+            return real_ip
+        except ValueError:
+            logger.warning(f"Invalid IP in X-Real-IP: {real_ip}")
+    
+    # Default to direct connection IP
+    return direct_ip
 
 
 def _create_rate_limit_key(request: Request, limit_type: str) -> str:
