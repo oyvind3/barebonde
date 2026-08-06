@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { apiErrorMessage, apiFetch, bootstrapIdentity, IdentityBootstrap } from '@/lib/api'
 import { ProgressTracker, OnboardingStep, InterestsSelector, Summary } from '@/components/onboarding'
