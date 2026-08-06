@@ -106,6 +106,38 @@ class SetPasswordRequest(BaseModel):
         return value
 
 
+class ChangePasswordRequest(BaseModel):
+    """Request model for changing an existing password.
+    
+    Requires the current password for verification before setting a new password.
+    """
+    current_password: str
+    new_password: str
+    confirm_new_password: str
+
+    @field_validator("current_password")
+    @classmethod
+    def validate_current_password(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Nåværende passord må oppgis.")
+        return value
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Passordet må være minst 8 tegn langt.")
+        if len(value) > 72:
+            raise ValueError("Passordet kan ikke være lengre enn 72 tegn.")
+        return value
+
+    @field_validator("confirm_new_password")
+    @classmethod
+    def validate_confirm_new_password(cls, value: str, info) -> str:
+        # We'll validate matching in the route handler
+        return value
+
+
 class AuthResponse(BaseModel):
     user_id: str
     email: str
