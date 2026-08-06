@@ -589,7 +589,15 @@ async def set_password(req: SetPasswordRequest, current: CurrentIdentity = Depen
     """Set or update the user's password.
     
     This can be used during onboarding or later in profile settings.
+    Returns 409 Conflict if the user already has a password set.
     """
+    # Prevent overwriting an existing password via this endpoint
+    if current.user.get("password_hash"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Passord er allerede satt. Bruk endre passord for å oppdatere.",
+        )
+    
     if req.password != req.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
