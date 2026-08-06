@@ -11,6 +11,8 @@ from typing import Any, Callable, Dict, Optional
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +113,13 @@ def _create_rate_limit_key(request: Request, limit_type: str) -> str:
     return f"{limit_type}:{ip}"
 
 
-async def rate_limit_middleware(
-    app: FastAPI,
-    call_next: Callable[[Request], Any],
-) -> Callable[[Request], Any]:
-    """Middleware factory for rate limiting."""
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Rate limiting middleware using Starlette's BaseHTTPMiddleware."""
 
-    async def middleware(request: Request) -> Response:
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
         # Skip rate limiting for health checks and static files
         if request.url.path in ["/health", "/ready"] or request.url.path.startswith("/static"):
             return await call_next(request)
@@ -164,18 +166,17 @@ async def rate_limit_middleware(
         
         # Add rate limit headers to response
         response.headers["X-RateLimit-Limit"] = str(limit_config.requests)
+        remaining_client = _rate_limiter._clients.get(rate_limit_key, ClientState())
         response.headers["X-RateLimit-Remaining"] = str(
-            max(0, limit_config.requests - len(_rate_limiter._clients.get(rate_limit_key, ClientState()).timestamps))
+            max(0, limit_config.requests - len(remaining_client.timestamps))
         )
         
         return response
 
-    return middleware
-
 
 def setup_rate_limiting(app: FastAPI) -> None:
     """Add rate limiting middleware to the FastAPI application."""
-    app.middleware("http")(rate_limit_middleware(app, lambda req: app.router.routes))
+    app.add_middleware(RateLimitMiddleware)
 
 
 # Dependency for endpoint-specific rate limiting

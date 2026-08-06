@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { apiFetch, apiErrorMessage } from '@/lib/api'
 
 interface OnboardingStepProps {
   stepNumber: number
@@ -56,7 +55,7 @@ export function OnboardingStep({
           {href && linkText && (
             <a 
               href={href}
-              className="inline-block mt-2 text-sm text-bonde-green hover:text-bonde-green/80 underline transition-colors"
+              className="inline-block mt-2 text-sm text-bonde-green hover:text-bonde-green/80 underline transition-colors focus:outline-none focus:ring-2 focus:ring-bonde-green focus:ring-offset-2 rounded"
             >
               {linkText}
             </a>

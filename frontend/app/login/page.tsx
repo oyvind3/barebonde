@@ -157,7 +157,7 @@ export default function LoginPage(){
                 placeholder={mode==='register'?'Minst 8 tegn':''}
                 autoComplete={mode==='login'?'current-password':'new-password'}
               />
-              {mode==='register' && password && password.length<8 &&(
+              {mode==='register' && (password || '').length < 8 && (password || '').length > 0 &&(
                 <p className="mt-1 text-xs text-gray-500">Passordet må være minst 8 tegn</p>
               )}
             </div>
@@ -192,7 +192,7 @@ export default function LoginPage(){
             
             <Button 
               type="submit" 
-              disabled={loading||(mode==='register'&&password&&password.length<8)} 
+              disabled={loading||(mode==='register' && (password || '').length < 8)} 
               variant="primary" 
               fullWidth
             >

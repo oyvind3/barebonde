@@ -87,7 +87,8 @@ class ChallengeService:
             raise InvalidChallengeError("Innloggingslenken er ugyldig eller er allerede brukt.") from exc
 
         expires_at = _parse_time(challenge.get("expires_at"))
-        if (expected_type and challenge.get("challenge_type") != expected_type) or challenge.get("challenge_type") not in {"email_login", "email_registration"} or challenge.get("consumed_at") or not expires_at or expires_at <= datetime.now(timezone.utc):
+        now = datetime.now(timezone.utc)
+        if (expected_type and challenge.get("challenge_type") != expected_type) or challenge.get("challenge_type") not in {"email_login", "email_registration"} or challenge.get("consumed_at") or not expires_at or expires_at <= now:
             raise InvalidChallengeError("Innloggingslenken er utløpt eller allerede brukt.")
 
         challenge["consumed_at"] = utc_now()
@@ -113,10 +114,9 @@ class ChallengeService:
             password = profile.get("password")
             if password:
                 from app.services.password_service import PasswordService
-                from datetime import datetime, timezone
                 password_hash = PasswordService.hash_password(password)
                 profile_updates["password_hash"] = password_hash
-                profile_updates["password_set_at"] = datetime.now(timezone.utc).isoformat()
+                profile_updates["password_set_at"] = utc_now()
             
             if profile_updates:
                 user = self.identity.update_profile(user, profile_updates)
