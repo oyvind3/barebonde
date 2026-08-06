@@ -118,3 +118,45 @@ class SessionService:
                 self.sessions.upsert_item(session)
                 revoked_count += 1
         return revoked_count
+
+    def revoke_all_sessions(self, user_id: str) -> int:
+        """Revoke all sessions for a user.
+        
+        Returns the count of revoked sessions.
+        """
+        sessions = list(
+            self.sessions.query_items(
+                query="SELECT * FROM c WHERE c.user_id = @user_id",
+                parameters=[{"name": "@user_id", "value": user_id}],
+                enable_cross_partition_query=True,
+            )
+        )
+        revoked_count = 0
+        for session in sessions:
+            if not session.get("revoked_at"):
+                session["revoked_at"] = utc_now()
+                self.sessions.upsert_item(session)
+                revoked_count += 1
+        return revoked_count
+
+    def revoke_other_sessions(self, user_id: str, exclude_session_id: str | None = None) -> int:
+        """Revoke all sessions for a user except optionally one.
+        
+        This is a simplified version that works with just user_id and session_id strings.
+        Returns the count of revoked sessions.
+        """
+        current_id = session_identifier(exclude_session_id) if exclude_session_id and len(exclude_session_id) > 32 else exclude_session_id
+        sessions = list(
+            self.sessions.query_items(
+                query="SELECT * FROM c WHERE c.user_id = @user_id",
+                parameters=[{"name": "@user_id", "value": user_id}],
+                enable_cross_partition_query=True,
+            )
+        )
+        revoked_count = 0
+        for session in sessions:
+            if (current_id is None or session["id"] != current_id) and not session.get("revoked_at"):
+                session["revoked_at"] = utc_now()
+                self.sessions.upsert_item(session)
+                revoked_count += 1
+        return revoked_count
