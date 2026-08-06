@@ -1,1 +1,1 @@
-Nothing should be ignored based on the provided file changes, as they only include source code files (.tsx) without any build artifacts, dependencies, or temporary files.
+Nothing needs to be added to the .gitignore file since the changes only include Python source files (.py) which are not build artifacts, dependencies, or temporary files.
