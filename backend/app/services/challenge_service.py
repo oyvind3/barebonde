@@ -76,6 +76,56 @@ class ChallengeService:
             registration_profile=registration_profile,
         )
 
+    def create_password_reset_challenge(self, *, email: str) -> str:
+        """Create a password reset challenge for the given email.
+        
+        Returns a raw token that should be sent to the user via email.
+        """
+        user = self.identity.find_existing_email_identity(email)
+        if user is None:
+            # Don't reveal if user exists - still create a dummy challenge to prevent timing attacks
+            # But we'll handle this in the route by returning early
+            raise IdentityError("account_not_found")
+        return self._create_challenge(challenge_type="password_reset", user=user)
+
+    def verify_password_reset_challenge(self, raw_token: str) -> dict[str, Any]:
+        """Verify a password reset token without consuming it.
+        
+        Returns the challenge data if valid, raises InvalidChallengeError otherwise.
+        The challenge is not consumed here - it will be consumed when the password is actually reset.
+        """
+        challenge_id = challenge_identifier(raw_token)
+        try:
+            challenge = self.challenges.read_item(item=challenge_id, partition_key=challenge_id)
+        except exceptions.CosmosResourceNotFoundError as exc:
+            raise InvalidChallengeError("Nullstillingslenken er ugyldig eller er allerede brukt.") from exc
+
+        expires_at = _parse_time(challenge.get("expires_at"))
+        now = datetime.now(timezone.utc)
+        if (challenge.get("challenge_type") != "password_reset" 
+            or challenge.get("consumed_at") 
+            or not expires_at 
+            or expires_at <= now):
+            raise InvalidChallengeError("Nullstillingslenken er utløpt eller allerede brukt.")
+        
+        return challenge
+
+    def invalidate_challenge(self, raw_token: str) -> None:
+        """Mark a challenge as consumed/invalidated."""
+        challenge_id = challenge_identifier(raw_token)
+        try:
+            challenge = self.challenges.read_item(item=challenge_id, partition_key=challenge_id)
+            challenge["consumed_at"] = utc_now()
+            self.challenges.replace_item(
+                item=challenge_id,
+                body=challenge,
+                etag=challenge.get("_etag"),
+                match_condition=MatchConditions.IfNotModified if challenge.get("_etag") else None,
+            )
+        except (exceptions.CosmosResourceNotFoundError, exceptions.CosmosHttpResponseError):
+            # Challenge already consumed or doesn't exist - ignore
+            pass
+
     def consume_email_login_challenge(self, raw_token: str) -> dict[str, Any]:
         return self.consume_email_challenge(raw_token, expected_type="email_login")
 

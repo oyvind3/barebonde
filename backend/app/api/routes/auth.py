@@ -106,6 +106,33 @@ class SetPasswordRequest(BaseModel):
         return value
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Request model for initiating a password reset."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request model for resetting password with a token."""
+    token: str
+    new_password: str
+    confirm_new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Passordet må være minst 8 tegn langt.")
+        if len(value) > 72:
+            raise ValueError("Passordet kan ikke være lengre enn 72 tegn.")
+        return value
+
+    @field_validator("confirm_new_password")
+    @classmethod
+    def validate_confirm_new_password(cls, value: str, info) -> str:
+        # We'll validate matching in the route handler
+        return value
+
+
 class ChangePasswordRequest(BaseModel):
     """Request model for changing an existing password.
     
@@ -629,23 +656,186 @@ async def set_password(req: SetPasswordRequest, current: CurrentIdentity = Depen
 
 @router.post("/password/change")
 async def change_password(
-    req: SetPasswordRequest,
+    req: ChangePasswordRequest,
     current: CurrentIdentity = Depends(require_csrf),
 ) -> dict[str, str]:
     """Change the user's password (requires knowing current password).
     
-    For security, this endpoint should validate the current password first.
-    For simplicity in this implementation, we just set the new password.
-    A more secure version would require current_password field.
+    Validates the current password before allowing a change.
+    Revokes all other sessions for security after password change.
     """
-    if req.password != req.confirm_password:
+    # Verify current password
+    password_hash = current.user.get("password_hash")
+    if not password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Passord er ikke satt. Bruk sett passord først.",
+        )
+    
+    if not PasswordService.verify_password(req.current_password, password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Nåværende passord er feil.",
+        )
+    
+    if req.new_password != req.confirm_new_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Passordene stemmer ikke overens.",
         )
     
     try:
-        password_hash = PasswordService.hash_password(req.password)
+        new_password_hash = PasswordService.hash_password(req.new_password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {
+        "password_hash": new_password_hash,
+        "password_set_at": now,
+    }
+    
+    user = IdentityService().update_profile(current.user, updates)
+    
+    # Revoke all other sessions for security
+    session_service = SessionService()
+    revoked_count = session_service.revoke_other_sessions(user["id"], exclude_session_id=current.session["id"])
+    
+    logger.info(
+        "Password changed for user %s (%s), revoked %d other sessions",
+        user["id"],
+        user.get("email", ""),
+        revoked_count,
+    )
+    
+    return {
+        "status": "ok",
+        "message": "Passord er endret. Andre sesjoner er logget ut.",
+        "has_password": True,
+    }
+
+
+@router.post("/password/forgot")
+async def forgot_password(req: ForgotPasswordRequest) -> dict[str, str]:
+    """Initiate password reset by sending a reset link to the user's email.
+    
+    This creates a password reset challenge and sends an email with a reset link.
+    The link expires after a configured TTL (default 1 hour).
+    """
+    email = str(req.email).lower()
+    
+    identity_service = IdentityService()
+    try:
+        user = identity_service.find_existing_email_identity(email)
+        if user is None:
+            # Don't reveal if email exists or not (security best practice)
+            return {
+                "status": "ok",
+                "message": "Hvis e-postadressen finnes i systemet, vil du motta en lenke for å nullstille passordet.",
+            }
+    except IdentityError:
+        return {
+            "status": "ok",
+            "message": "Hvis e-postadressen finnes i systemet, vil du motta en lenke for å nullstille passordet.",
+        }
+    
+    # Check if user has a password set (only makes sense for users with passwords)
+    if not user.get("password_hash"):
+        return {
+            "status": "ok",
+            "message": "Du har ikke satt et passord ennå. Bruk innloggingslenke på e-post.",
+        }
+    
+    # Create password reset challenge
+    try:
+        raw_token = ChallengeService().create_password_reset_challenge(email=email)
+    except (IdentitySecurityConfigurationError, IdentityError) as exc:
+        logger.warning("Failed to create password reset challenge: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Kunne ikke opprette nullstillingslenke akkurat nå.",
+        ) from exc
+    
+    # Send reset email
+    safe_name = html.escape(user.get("first_name", "Bonde") or "Bonde")
+    reset_url = f"{_frontend_url()}/auth/reset-password?token={raw_token}"
+    
+    try:
+        await _send_plunk_email(
+            to=email,
+            subject="Nullstill ditt passord hos Barebonde",
+            body=(
+                f"<h1>Hei {safe_name}!</h1>"
+                f"<p>Du ba om å nullstille passordet ditt.</p>"
+                f"<p><a href='{reset_url}'>Nullstill passord</a></p>"
+                f"<p>Lenken kan brukes én gang og utløper om {settings.identity_magic_link_ttl_seconds // 60} minutter.</p>"
+                f"<p>Hvis du ikke ba om dette, kan du ignorere denne e-posten.</p>"
+            ),
+        )
+    except EmailDeliveryError as exc:
+        logger.warning("Password reset email failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Kunne ikke sende e-post for nullstilling av passord.",
+        ) from exc
+    
+    return {
+        "status": "ok",
+        "message": "Hvis e-postadressen finnes i systemet, vil du motta en lenke for å nullstille passordet.",
+    }
+
+
+@router.post("/password/reset")
+async def reset_password(req: ResetPasswordRequest, response: Response) -> dict[str, str]:
+    """Reset password using a valid reset token.
+    
+    This verifies the reset token and sets a new password.
+    All existing sessions are revoked for security.
+    """
+    # Verify the reset token and get user info
+    challenge_service = ChallengeService()
+    try:
+        challenge_data = challenge_service.verify_password_reset_challenge(req.token)
+        email = challenge_data.get("email")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ugyldig eller utløpt nullstillingslenke.",
+            )
+    except (InvalidChallengeError, IdentityError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ugyldig eller utløpt nullstillingslenke.",
+        ) from exc
+    
+    # Find the user
+    identity_service = IdentityService()
+    try:
+        user = identity_service.find_existing_email_identity(str(email))
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ugyldig nullstillingslenke.",
+            )
+    except IdentityError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ugyldig nullstillingslenke.",
+        ) from None
+    
+    # Validate passwords match
+    if req.new_password != req.confirm_new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passordene stemmer ikke overens.",
+        )
+    
+    # Hash and set new password
+    try:
+        password_hash = PasswordService.hash_password(req.new_password)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -658,10 +848,19 @@ async def change_password(
         "password_set_at": now,
     }
     
-    user = IdentityService().update_profile(current.user, updates)
+    user = IdentityService().update_profile(user, updates)
+    
+    # Revoke all sessions including the current one (force re-login)
+    session_service = SessionService()
+    session_service.revoke_all_sessions(user["id"])
+    
+    # Invalidate the used challenge
+    challenge_service.invalidate_challenge(req.token)
+    
+    logger.info("Password reset completed for user %s (%s)", user["id"], user.get("email", ""))
     
     return {
         "status": "ok",
-        "message": "Passord er endret.",
+        "message": "Passordet er nullstilt. Vennligst logg inn med nytt passord.",
         "has_password": True,
     }
