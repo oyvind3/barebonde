@@ -133,20 +133,20 @@ def _validate_file(content_type: str, size_bytes: int, file_name: str) -> None:
     normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
 
     if not file_name.strip() or size_bytes == 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filen kan ikke vÃ¦re tom.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filen kan ikke være tom.")
     if size_bytes > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Filen er for stor. Maks stÃ¸rrelse er 15 MB.",
+            detail="Filen er for stor. Maks størrelse er 15 MB.",
         )
     if normalized_content_type == "application/octet-stream":
         if extension not in ALLOWED_EXTENSIONS:
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Ukjent eller ugyldig filtype.")
         return
     if normalized_content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Filtypen stÃ¸ttes ikke.")
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Filtypen støttes ikke.")
     if extension and extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Filendelsen stÃ¸ttes ikke.")
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Filendelsen støttes ikke.")
 
 
 def _document_response(item: dict[str, Any]) -> DocumentResponse:
@@ -202,7 +202,7 @@ def _read_document(*, farm_id: str, document_id: str) -> dict[str, Any]:
     except Exception as exc:
         if _is_not_found(exc):
             raise _resource_not_found() from exc
-        raise _service_unavailable("Dokumenttjenesten er utilgjengelig. PrÃ¸v igjen.", exc) from exc
+        raise _service_unavailable("Dokumenttjenesten er utilgjengelig. Prøv igjen.", exc) from exc
     if item.get("farm_id") != farm_id:
         # Point reads should already enforce this; retain the check for malformed legacy documents.
         logger.warning("Document partition mismatch for document id %s", document_id)
@@ -228,7 +228,7 @@ def _list_voucher_items(farm_id: str) -> list[dict[str, Any]]:
             )
         )
     except Exception as exc:
-        raise _service_unavailable("Dokumenttjenesten er utilgjengelig. PrÃ¸v igjen.", exc) from exc
+        raise _service_unavailable("Dokumenttjenesten er utilgjengelig. Prøv igjen.", exc) from exc
 
 
 def _fetch_transactions(farm_id: str) -> list[dict[str, Any]]:
@@ -242,7 +242,7 @@ def _fetch_transactions(farm_id: str) -> list[dict[str, Any]]:
             )
         )
     except Exception as exc:
-        raise _service_unavailable("Regnskapstjenesten er utilgjengelig. PrÃ¸v igjen.", exc) from exc
+        raise _service_unavailable("Regnskapstjenesten er utilgjengelig. Prøv igjen.", exc) from exc
 
 
 def _write_audit_event(event_type: str, farm_id: str, user_id: str) -> None:
@@ -351,7 +351,7 @@ async def upload_voucher(
             payload=payload,
         )
     except Exception as exc:
-        raise _service_unavailable("Filopplasting er utilgjengelig. PrÃ¸v igjen.", exc) from exc
+        raise _service_unavailable("Filopplasting er utilgjengelig. Prøv igjen.", exc) from exc
 
     document_item = {
         "id": document_id,
@@ -390,7 +390,7 @@ async def upload_voucher(
             logger.warning("Blob cleanup failed after voucher metadata failure: %s", cleanup_exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Kunne ikke lagre bilaget. PrÃ¸v igjen.",
+            detail="Kunne ikke lagre bilaget. Prøv igjen.",
         ) from exc
 
     _write_audit_event("DocumentUploaded", farm_id, authorized.current.user["user_id"])
@@ -407,7 +407,7 @@ async def list_vouchers(
     _: AuthorizedFarm = Depends(require_farm_permission(Permission.VOUCHER_READ)),
 ) -> list[VoucherResponse]:
     if date_from and date_to and date_from > date_to:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fra-dato kan ikke vÃ¦re etter til-dato")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fra-dato kan ikke være etter til-dato")
     return [
         _voucher_response(item)
         for item in _list_voucher_items(farm_id)
@@ -456,7 +456,7 @@ async def download_document(
     try:
         payload = storage_service.download_file(blob_name)
     except Exception as exc:
-        raise _service_unavailable("Dokumentet er midlertidig utilgjengelig. PrÃ¸v igjen.", exc) from exc
+        raise _service_unavailable("Dokumentet er midlertidig utilgjengelig. Prøv igjen.", exc) from exc
 
     file_name = str(document.get("file_name") or "dokument")
     return StreamingResponse(
@@ -480,10 +480,10 @@ async def book_voucher(
 ) -> VoucherResponse:
     """Book one voucher and atomically-as-practical create its transaction."""
     if request.transaction_type not in {"income", "expense"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="transaction_type mÃ¥ vÃ¦re income eller expense")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="transaction_type må være income eller expense")
     item = _read_voucher(farm_id=farm_id, voucher_id=voucher_id)
     if item.get("status") == "f\u00f8rt":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede fÃ¸rt.")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede ført.")
 
     now = datetime.now(timezone.utc).isoformat()
     transaction_item = {
@@ -504,9 +504,9 @@ async def book_voucher(
     try:
         get_transactions_container().create_item(transaction_item)
     except exceptions.CosmosResourceExistsError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede fÃ¸rt.") from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede ført.") from exc
     except Exception as exc:
-        raise _service_unavailable("Kunne ikke fÃ¸re bilaget. PrÃ¸v igjen.", exc) from exc
+        raise _service_unavailable("Kunne ikke føre bilaget. Prøv igjen.", exc) from exc
 
     item.update(
         {
@@ -528,7 +528,7 @@ async def book_voucher(
             logger.warning("Transaction cleanup failed after voucher booking failure: %s", cleanup_exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Kunne ikke fÃ¸re bilaget. PrÃ¸v igjen.",
+            detail="Kunne ikke føre bilaget. Prøv igjen.",
         ) from exc
 
     _write_audit_event("VoucherBooked", farm_id, authorized.current.user["user_id"])

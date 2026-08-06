@@ -13,6 +13,7 @@ from azure.core.credentials import AzureKeyCredential
 from pypdf import PdfReader
 
 from app.core.config import settings
+from app.services.invoice_field_parser import FieldCandidate, invoice_field_parser
 
 
 @dataclass
@@ -21,6 +22,25 @@ class OCRResult:
     provider: str
     confidence: Optional[float]
     warnings: list[str]
+
+
+@dataclass
+class ExtractedFields:
+    """Structured fields extracted from OCR text."""
+
+    supplier_name: Optional[FieldCandidate] = None
+    org_number: Optional[FieldCandidate] = None
+    invoice_number: Optional[FieldCandidate] = None
+    invoice_date: Optional[FieldCandidate] = None
+    due_date: Optional[FieldCandidate] = None
+    amount_total: Optional[FieldCandidate] = None
+    amount_vat: Optional[FieldCandidate] = None
+    amount_excl_vat: Optional[FieldCandidate] = None
+    currency: Optional[FieldCandidate] = None
+    kid: Optional[FieldCandidate] = None
+    bank_account: Optional[FieldCandidate] = None
+    description: Optional[FieldCandidate] = None
+    text_preview: Optional[str] = None
 
 
 class OCRService:
@@ -131,80 +151,80 @@ class OCRService:
         return fallback
 
     def infer_fields(self, text: str) -> dict[str, Any]:
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        normalized = "\n".join(lines)
+        """Legacy method for backward compatibility.
 
-        amount_candidates = self._extract_amount_candidates(normalized)
-        date_candidate = self._extract_date_candidate(normalized)
-        supplier_candidate = self._extract_supplier_candidate(lines)
+        Returns simple field suggestions from OCR text.
+        """
+        parsed = invoice_field_parser.parse_fields(text)
+
+        amount_total = parsed.get("amount_total")
+        date_candidate = parsed.get("invoice_date")
+        supplier_candidate = parsed.get("supplier_name")
 
         return {
-            "suggested_amount": amount_candidates[0] if amount_candidates else None,
-            "suggested_date": date_candidate,
-            "suggested_supplier": supplier_candidate,
-            "text_preview": normalized[:1200],
+            "suggested_amount": float(amount_total.value) if amount_total else None,
+            "suggested_date": date_candidate.value if date_candidate else None,
+            "suggested_supplier": supplier_candidate.value if supplier_candidate else None,
+            "text_preview": parsed.get("text_preview"),
+            # New structured fields
+            "extracted_fields": {
+                "supplier_name": self._field_to_dict(supplier_candidate),
+                "org_number": self._field_to_dict(parsed.get("org_number")),
+                "invoice_number": self._field_to_dict(parsed.get("invoice_number")),
+                "invoice_date": self._field_to_dict(date_candidate),
+                "due_date": self._field_to_dict(parsed.get("due_date")),
+                "amount_total": self._field_to_dict(amount_total),
+                "amount_vat": self._field_to_dict(parsed.get("amount_vat")),
+                "currency": self._field_to_dict(parsed.get("currency")),
+                "kid": self._field_to_dict(parsed.get("kid")),
+                "bank_account": self._field_to_dict(parsed.get("bank_account")),
+            },
+        }
+
+    def extract_structured_fields(self, text: str) -> ExtractedFields:
+        """Extract structured fields from OCR text with confidence scores."""
+        parsed = invoice_field_parser.parse_fields(text)
+        return ExtractedFields(
+            supplier_name=parsed.get("supplier_name"),
+            org_number=parsed.get("org_number"),
+            invoice_number=parsed.get("invoice_number"),
+            invoice_date=parsed.get("invoice_date"),
+            due_date=parsed.get("due_date"),
+            amount_total=parsed.get("amount_total"),
+            amount_vat=parsed.get("amount_vat"),
+            amount_excl_vat=parsed.get("amount_excl_vat"),
+            currency=parsed.get("currency"),
+            kid=parsed.get("kid"),
+            bank_account=parsed.get("bank_account"),
+            description=parsed.get("description"),
+            text_preview=parsed.get("text_preview"),
+        )
+
+    def _field_to_dict(self, field: Optional[Any]) -> Optional[dict[str, Any]]:
+        """Convert FieldCandidate to dictionary for JSON serialization."""
+        if field is None:
+            return None
+        return {
+            "value": field.value,
+            "confidence": field.confidence,
+            "source": field.source,
+            "needs_review": field.needs_review,
+            "label_context": field.label_context,
         }
 
     def _extract_amount_candidates(self, text: str) -> list[float]:
-        # Captures values like 1 234,56 / 1234.56 / NOK 2.500,00.
-        pattern = r"(?:NOK|kr|KR)?\s*(\d{1,3}(?:[\s.]\d{3})*(?:[,\.]\d{2})|\d+(?:[,\.]\d{2}))"
-        raw_matches = re.findall(pattern, text)
-        candidates: list[float] = []
-
-        for match in raw_matches:
-            value = match.replace(" ", "")
-            if value.count(",") == 1 and value.count(".") >= 1:
-                value = value.replace(".", "").replace(",", ".")
-            elif value.count(",") == 1:
-                value = value.replace(",", ".")
-            elif value.count(".") > 1:
-                value = value.replace(".", "")
-
-            try:
-                parsed = float(value)
-            except ValueError:
-                continue
-
-            if parsed > 0:
-                candidates.append(parsed)
-
-        candidates = sorted(set(candidates), reverse=True)
-        return candidates[:3]
+        """Legacy method - kept for backward compatibility."""
+        return [float(c.value) for c in invoice_field_parser._find_all_amounts(text)][:3]
 
     def _extract_date_candidate(self, text: str) -> Optional[str]:
-        patterns = [
-            r"\b(\d{4})-(\d{2})-(\d{2})\b",
-            r"\b(\d{2})\.(\d{2})\.(\d{4})\b",
-            r"\b(\d{2})/(\d{2})/(\d{4})\b",
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if not match:
-                continue
-
-            groups = match.groups()
-            try:
-                if pattern.startswith(r"\b(\d{4})"):
-                    dt = datetime(int(groups[0]), int(groups[1]), int(groups[2]))
-                else:
-                    dt = datetime(int(groups[2]), int(groups[1]), int(groups[0]))
-                return dt.date().isoformat()
-            except ValueError:
-                continue
-
-        return None
+        """Legacy method - kept for backward compatibility."""
+        result = invoice_field_parser._find_any_date(text)
+        return result.value if result else None
 
     def _extract_supplier_candidate(self, lines: list[str]) -> Optional[str]:
-        for line in lines[:8]:
-            cleaned = re.sub(r"\s+", " ", line).strip()
-            if len(cleaned) < 3:
-                continue
-            if re.search(r"org\.nr|faktura|dato|sum|mva", cleaned, flags=re.IGNORECASE):
-                continue
-            if any(ch.isalpha() for ch in cleaned):
-                return cleaned[:80]
-        return None
+        """Legacy method - kept for backward compatibility."""
+        result = invoice_field_parser._extract_supplier_name(lines)
+        return result.value if result else None
 
 
 ocr_service = OCRService()
