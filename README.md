@@ -2,6 +2,8 @@
 
 Barebonde er en modulær plattform for norske gårdsbruk og landbruksforetak. Løsningen utvikles rundt gårdsoversikt, regnskap og bilag, dokumenter, frister, ressurser og drift.
 
+**Status**: MVP-fase med identitet, medlemskap, abonnement og tenant-isolasjon implementert.
+
 ## Dagens løsning
 
 - `frontend/`: Next.js 14 med TypeScript og statisk eksport til Azure Static Web Apps.
@@ -25,6 +27,8 @@ Et eventuelt tidligere Ory-prosjekt må slettes eller deaktiveres manuelt i Ory-
 Hver Farm har ett abonnement i `subscriptions` med partisjonsnøkkel `/farm_id`. Planene `free`, `standard` og `premium` er statiske og versjonerte i backend. Nye Farms får `free` før de aktiveres, og `/api/me` initialiserer bare aktiv eksisterende Farm når abonnement mangler. Frontend får en sikker plan- og entitlement-projeksjon fra `/api/me`, mens API-et kontrollerer den på nytt. Usage og betaling er ikke implementert.
 
 ## Lokal utvikling
+
+**Forutsetninger**: Python 3.11+, Node.js 20+, Azure Cosmos DB-emulator eller Azure-tilgang.
 
 ```bash
 # Backend
@@ -94,6 +98,10 @@ docs/architecture/       Arkitekturbeslutninger
 - [Produktbacklog](./backlog/epics.md)
 - [Statusrapport](./STATUS_REPORT.md)
 - [Sjekkliste](./CHECKLIST.md)
+
+## Kontakt
+
+Prosjektet utvikles for norske gårdsbruk og landbruksforetak. Se produktbacklogen for planlagte funksjoner og prioriteringer.
 
 ## Neste planlagte fase
 
