@@ -70,17 +70,32 @@ class DocumentResponse(BaseModel):
     status: str
     created_at: Optional[str] = None
     created_by_user_id: Optional[str] = None
-    ocr_text_preview: Optional[str] = None
-    ocr_provider: Optional[str] = None
-    ocr_confidence: Optional[float] = None
+    # Do not expose raw OCR text, confidence or provider by default
 
 
 class VoucherResponse(DocumentResponse):
+    # User-confirmed fields (authoritative for booking)
     amount: float
     account_code: Optional[str]
     mva_code: Optional[str]
     voucher_date: str
     description: Optional[str]
+    # Supplier fields
+    supplier_name: Optional[str] = None
+    supplier_org_number: Optional[str] = None
+    # Invoice fields
+    invoice_number: Optional[str] = None
+    due_date: Optional[str] = None
+    # Amount breakdown
+    amount_excluding_vat: Optional[float] = None
+    vat_amount: Optional[float] = None
+    currency: str = "NOK"
+    # Payment info
+    kid: Optional[str] = None
+    bank_account: Optional[str] = None
+    # Document type
+    document_type: str = "invoice"
+    # Legacy OCR suggestions (kept for backward compatibility)
     ocr_suggested_amount: Optional[float] = None
     ocr_suggested_date: Optional[str] = None
     ocr_suggested_supplier: Optional[str] = None
@@ -108,6 +123,33 @@ class BookVoucherRequest(BaseModel):
     transaction_type: str = "expense"
     category: Optional[str] = None
     description: Optional[str] = None
+
+
+class ReviewVoucherRequest(BaseModel):
+    """Request to update user-confirmed fields on an unbooked voucher."""
+    amount: Optional[float] = None
+    voucher_date: Optional[str] = None
+    description: Optional[str] = None
+    # Supplier fields
+    supplier_name: Optional[str] = None
+    supplier_org_number: Optional[str] = None
+    # Invoice fields
+    invoice_number: Optional[str] = None
+    due_date: Optional[str] = None
+    # Amount breakdown
+    amount_excluding_vat: Optional[float] = None
+    vat_amount: Optional[float] = None
+    currency: Optional[str] = None
+    # Payment info
+    kid: Optional[str] = None
+    bank_account: Optional[str] = None
+    # Document type
+    document_type: Optional[str] = None
+    # Accounting fields (set when ready for booking)
+    account_code: Optional[str] = None
+    mva_code: Optional[str] = None
+    # Mark as reviewed and ready for booking
+    ready_for_booking: bool = False
 
 
 def _resource_not_found() -> HTTPException:
@@ -159,9 +201,6 @@ def _document_response(item: dict[str, Any]) -> DocumentResponse:
         status=str(item.get("status") or "mottatt"),
         created_at=item.get("created_at"),
         created_by_user_id=item.get("created_by_user_id"),
-        ocr_text_preview=item.get("ocr_text_preview"),
-        ocr_provider=item.get("ocr_provider"),
-        ocr_confidence=item.get("ocr_confidence"),
     )
 
 
@@ -173,6 +212,22 @@ def _voucher_response(item: dict[str, Any]) -> VoucherResponse:
         mva_code=item.get("mva_code"),
         voucher_date=str(item.get("voucher_date") or datetime.now(timezone.utc).date().isoformat()),
         description=item.get("description"),
+        # Supplier fields
+        supplier_name=item.get("supplier_name"),
+        supplier_org_number=item.get("supplier_org_number"),
+        # Invoice fields
+        invoice_number=item.get("invoice_number"),
+        due_date=item.get("due_date"),
+        # Amount breakdown
+        amount_excluding_vat=item.get("amount_excluding_vat"),
+        vat_amount=item.get("vat_amount"),
+        currency=item.get("currency", "NOK"),
+        # Payment info
+        kid=item.get("kid"),
+        bank_account=item.get("bank_account"),
+        # Document type
+        document_type=item.get("document_type", "invoice"),
+        # Legacy OCR suggestions (kept for backward compatibility)
         ocr_suggested_amount=item.get("ocr_suggested_amount"),
         ocr_suggested_date=item.get("ocr_suggested_date"),
         ocr_suggested_supplier=item.get("ocr_suggested_supplier"),
@@ -323,7 +378,12 @@ async def upload_voucher(
         require_farm_permission(Permission.VOUCHER_CREATE, require_csrf_protection=True, require_active_farm=True)
     ),
 ) -> VoucherResponse:
-    """Upload a voucher into the authorized Farm and persist safe metadata."""
+    """Upload a voucher into the authorized Farm and persist safe metadata.
+    
+    OCR extraction runs asynchronously when available. User-confirmed fields
+    are stored separately from raw OCR suggestions. The voucher status is set
+    to 'needs_review' if OCR confidence is low or extraction failed.
+    """
     if submitted_farm_id and submitted_farm_id != farm_id:
         raise _tenant_mismatch()
 
@@ -334,13 +394,19 @@ async def upload_voucher(
 
     document_id = str(uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Extract text and structured fields
     try:
         ocr_result = ocr_service.extract_text(payload=payload, content_type=content_type, file_name=file_name)
-        inferred_fields = ocr_service.infer_fields(ocr_result.text)
+        extracted = ocr_service.extract_structured_fields(ocr_result.text)
     except Exception as exc:
         logger.warning("OCR preprocessing failed for new voucher: %s", exc)
         ocr_result = OCRResult(text="", provider="unavailable", confidence=None, warnings=["OCR var ikke tilgjengelig"])
-        inferred_fields = {"suggested_amount": None, "suggested_date": None, "suggested_supplier": None, "text_preview": None}
+        extracted = None
+    
+    # Determine initial status based on extraction success
+    extraction_status = "completed" if extracted else "failed"
+    initial_status = "needs_review" if not extracted or ocr_result.warnings else "mottatt"
 
     try:
         blob = storage_service.upload_file(
@@ -353,6 +419,7 @@ async def upload_voucher(
     except Exception as exc:
         raise _service_unavailable("Filopplasting er utilgjengelig. Prøv igjen.", exc) from exc
 
+    # Build document with both user-confirmed and suggested fields
     document_item = {
         "id": document_id,
         "type": "voucher_document",
@@ -361,21 +428,53 @@ async def upload_voucher(
         "content_type": content_type,
         "size_bytes": blob["size_bytes"],
         "blob_name": blob["blob_name"],
-        # Legacy blob_url values may remain in old documents, but new responses never expose one.
-        "description": description or inferred_fields.get("suggested_supplier") or "",
-        "simple_mode": bool(simple_mode),
-        "status": "mottatt",
+        # User-confirmed fields (can be updated via PATCH before booking)
+        "description": description,
+        "voucher_date": voucher_date,
+        "status": initial_status,
         "account_code": None,
         "mva_code": None,
-        "amount": float(inferred_fields.get("suggested_amount") or 0.0),
-        "voucher_date": inferred_fields.get("suggested_date") or voucher_date or datetime.now(timezone.utc).date().isoformat(),
+        "amount": 0.0,
+        # Supplier fields from OCR suggestions
+        "supplier_name": extracted.supplier_name.value if extracted and extracted.supplier_name else None,
+        "supplier_org_number": extracted.org_number.value if extracted and extracted.org_number else None,
+        # Invoice fields from OCR suggestions
+        "invoice_number": extracted.invoice_number.value if extracted and extracted.invoice_number else None,
+        "due_date": extracted.due_date.value if extracted and extracted.due_date else None,
+        # Amount fields from OCR suggestions
+        "amount_excluding_vat": float(extracted.amount_excl_vat.value) if extracted and extracted.amount_excl_vat else None,
+        "vat_amount": float(extracted.amount_vat.value) if extracted and extracted.amount_vat else None,
+        "currency": extracted.currency.value if extracted and extracted.currency else "NOK",
+        # Payment info from OCR suggestions
+        "kid": extracted.kid.value if extracted and extracted.kid else None,
+        "bank_account": extracted.bank_account.value if extracted and extracted.bank_account else None,
+        # Document type detection (default to invoice)
+        "document_type": "invoice",
+        # Extraction metadata (not exposed in default API responses)
+        "extraction_provider": ocr_result.provider,
+        "extraction_status": extraction_status,
+        "extracted_at": now if extracted else None,
+        "field_suggestions": {
+            "supplier_name": ocr_service._field_to_dict(extracted.supplier_name) if extracted and extracted.supplier_name else None,
+            "org_number": ocr_service._field_to_dict(extracted.org_number) if extracted and extracted.org_number else None,
+            "invoice_number": ocr_service._field_to_dict(extracted.invoice_number) if extracted and extracted.invoice_number else None,
+            "invoice_date": ocr_service._field_to_dict(extracted.invoice_date) if extracted and extracted.invoice_date else None,
+            "due_date": ocr_service._field_to_dict(extracted.due_date) if extracted and extracted.due_date else None,
+            "amount_total": ocr_service._field_to_dict(extracted.amount_total) if extracted and extracted.amount_total else None,
+            "amount_vat": ocr_service._field_to_dict(extracted.amount_vat) if extracted and extracted.amount_vat else None,
+            "currency": ocr_service._field_to_dict(extracted.currency) if extracted and extracted.currency else None,
+            "kid": ocr_service._field_to_dict(extracted.kid) if extracted and extracted.kid else None,
+            "bank_account": ocr_service._field_to_dict(extracted.bank_account) if extracted and extracted.bank_account else None,
+        } if extracted else {},
+        # Legacy fields for backward compatibility
+        "simple_mode": bool(simple_mode),
         "ocr_provider": ocr_result.provider,
         "ocr_confidence": ocr_result.confidence,
-        "ocr_text_preview": inferred_fields.get("text_preview"),
+        "ocr_text_preview": extracted.text_preview if extracted else None,
         "ocr_warnings": ocr_result.warnings,
-        "ocr_suggested_amount": inferred_fields.get("suggested_amount"),
-        "ocr_suggested_date": inferred_fields.get("suggested_date"),
-        "ocr_suggested_supplier": inferred_fields.get("suggested_supplier"),
+        "ocr_suggested_amount": float(extracted.amount_total.value) if extracted and extracted.amount_total else None,
+        "ocr_suggested_date": extracted.invoice_date.value if extracted and extracted.invoice_date else None,
+        "ocr_suggested_supplier": extracted.supplier_name.value if extracted and extracted.supplier_name else None,
         "created_by_user_id": authorized.current.user["user_id"],
         "created_at": now,
         "updated_at": now,
@@ -422,6 +521,86 @@ async def get_voucher(
     _: AuthorizedFarm = Depends(require_farm_permission(Permission.VOUCHER_READ)),
 ) -> VoucherResponse:
     return _voucher_response(_read_voucher(farm_id=farm_id, voucher_id=voucher_id))
+
+
+@router.patch("/api/farms/{farm_id}/vouchers/{voucher_id}", response_model=VoucherResponse)
+async def review_voucher(
+    farm_id: str,
+    voucher_id: str,
+    request: ReviewVoucherRequest,
+    authorized: AuthorizedFarm = Depends(
+        require_farm_permission(Permission.VOUCHER_CREATE, require_csrf_protection=True, require_active_farm=True)
+    ),
+) -> VoucherResponse:
+    """Update user-confirmed fields on an unbooked voucher.
+    
+    This endpoint allows users to correct OCR suggestions before booking.
+    User-confirmed values are authoritative and will not be overwritten by OCR.
+    The voucher status is updated to 'ready' when all required fields are set.
+    """
+    item = _read_voucher(farm_id=farm_id, voucher_id=voucher_id)
+    
+    if item.get("status") == "ført":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede ført og kan ikke endres.")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update only fields provided in the request (partial update)
+    if request.amount is not None:
+        item["amount"] = request.amount
+    if request.voucher_date is not None:
+        item["voucher_date"] = request.voucher_date
+    if request.description is not None:
+        item["description"] = request.description
+    if request.supplier_name is not None:
+        item["supplier_name"] = request.supplier_name
+    if request.supplier_org_number is not None:
+        item["supplier_org_number"] = request.supplier_org_number
+    if request.invoice_number is not None:
+        item["invoice_number"] = request.invoice_number
+    if request.due_date is not None:
+        item["due_date"] = request.due_date
+    if request.amount_excluding_vat is not None:
+        item["amount_excluding_vat"] = request.amount_excluding_vat
+    if request.vat_amount is not None:
+        item["vat_amount"] = request.vat_amount
+    if request.currency is not None:
+        item["currency"] = request.currency
+    if request.kid is not None:
+        item["kid"] = request.kid
+    if request.bank_account is not None:
+        item["bank_account"] = request.bank_account
+    if request.document_type is not None:
+        item["document_type"] = request.document_type
+    if request.account_code is not None:
+        item["account_code"] = request.account_code
+    if request.mva_code is not None:
+        item["mva_code"] = request.mva_code
+    
+    # Update status based on ready_for_booking flag or field completeness
+    if request.ready_for_booking:
+        # Validate required fields before marking as ready
+        required_fields = ["amount", "voucher_date", "account_code", "description"]
+        missing_fields = [f for f in required_fields if not item.get(f)]
+        if missing_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Manglende påkrevde felt: {', '.join(missing_fields)}"
+            )
+        item["status"] = "ready"
+    elif item.get("status") == "needs_review":
+        # Keep in needs_review until explicitly marked ready
+        pass
+    
+    item["updated_at"] = now
+    
+    try:
+        get_documents_container().replace_item(item=item["id"], body=item)
+    except Exception as exc:
+        raise _service_unavailable("Kunne ikke lagre endringene. Prøv igjen.", exc) from exc
+    
+    _write_audit_event("VoucherReviewed", farm_id, authorized.current.user["user_id"])
+    return _voucher_response(item)
 
 
 @router.get("/api/farms/{farm_id}/documents", response_model=list[DocumentResponse])
@@ -478,13 +657,30 @@ async def book_voucher(
         require_farm_permission(Permission.VOUCHER_BOOK, require_csrf_protection=True, require_active_farm=True)
     ),
 ) -> VoucherResponse:
-    """Book one voucher and atomically-as-practical create its transaction."""
+    """Book one voucher and atomically-as-practical create its transaction.
+    
+    Uses user-confirmed values from the voucher document. The request can override
+    specific fields, but typically the already-reviewed voucher values are used.
+    """
     if request.transaction_type not in {"income", "expense"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="transaction_type må være income eller expense")
     item = _read_voucher(farm_id=farm_id, voucher_id=voucher_id)
-    if item.get("status") == "f\u00f8rt":
+    if item.get("status") == "ført":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede ført.")
-
+    
+    # Use user-confirmed values from voucher unless explicitly overridden in request
+    amount = request.amount if request.amount is not None else item.get("amount", 0.0)
+    account_code = request.account_code if request.account_code else item.get("account_code")
+    mva_code = request.mva_code if request.mva_code is not None else item.get("mva_code")
+    description = request.description if request.description is not None else item.get("description", "")
+    voucher_date = item.get("voucher_date") or datetime.now(timezone.utc).date().isoformat()
+    
+    # Validate required fields for booking
+    if not account_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Regnskapskonto er påkrevd for bokføring.")
+    if not amount or amount <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Beløp må være større enn null.")
+    
     now = datetime.now(timezone.utc).isoformat()
     transaction_item = {
         "id": f"transaction:{voucher_id}",
@@ -493,11 +689,11 @@ async def book_voucher(
         "voucher_id": voucher_id,
         "transaction_type": request.transaction_type,
         "category": request.category or "Drift",
-        "amount": request.amount,
-        "account_code": request.account_code,
-        "mva_code": request.mva_code,
-        "description": request.description or item.get("description") or "",
-        "voucher_date": item.get("voucher_date") or datetime.now(timezone.utc).date().isoformat(),
+        "amount": amount,
+        "account_code": account_code,
+        "mva_code": mva_code,
+        "description": description,
+        "voucher_date": voucher_date,
         "created_by_user_id": authorized.current.user["user_id"],
         "created_at": now,
     }
@@ -510,11 +706,11 @@ async def book_voucher(
 
     item.update(
         {
-            "amount": request.amount,
-            "account_code": request.account_code,
-            "mva_code": request.mva_code,
-            "status": "f\u00f8rt",
-            "description": request.description or item.get("description") or "",
+            "amount": amount,
+            "account_code": account_code,
+            "mva_code": mva_code,
+            "status": "ført",
+            "description": description,
             "updated_at": now,
         }
     )

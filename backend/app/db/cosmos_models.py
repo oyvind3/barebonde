@@ -489,12 +489,32 @@ class AccountingDocument:
         blob_name: str,
         size_bytes: int,
         blob_url: Optional[str] = None,
-        status: str = "mottatt",
+        status: str = "mottatt",  # mottatt, needs_review, ready, booked, extraction_failed
         account_code: Optional[str] = None,
         mva_code: Optional[str] = None,
         amount: float = 0.0,
         voucher_date: Optional[str] = None,
         description: Optional[str] = None,
+        # Supplier fields
+        supplier_name: Optional[str] = None,
+        supplier_org_number: Optional[str] = None,
+        # Invoice fields
+        invoice_number: Optional[str] = None,
+        due_date: Optional[str] = None,
+        # Amount breakdown
+        amount_excluding_vat: Optional[float] = None,
+        vat_amount: Optional[float] = None,
+        currency: str = "NOK",
+        # Payment info
+        kid: Optional[str] = None,
+        bank_account: Optional[str] = None,
+        # Document type
+        document_type: str = "invoice",  # invoice, receipt, credit_note, other
+        # Extraction metadata (not shown to user by default)
+        extraction_provider: Optional[str] = None,
+        extraction_status: Optional[str] = None,  # pending, completed, failed
+        extracted_at: Optional[str] = None,
+        field_suggestions: Optional[dict] = None,  # Raw OCR suggestions before user confirmation
         id: Optional[str] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -513,6 +533,26 @@ class AccountingDocument:
         self.amount = amount
         self.voucher_date = voucher_date or datetime.utcnow().date().isoformat()
         self.description = description or ""
+        # Supplier
+        self.supplier_name = supplier_name
+        self.supplier_org_number = supplier_org_number
+        # Invoice
+        self.invoice_number = invoice_number
+        self.due_date = due_date
+        # Amount breakdown
+        self.amount_excluding_vat = amount_excluding_vat
+        self.vat_amount = vat_amount
+        self.currency = currency
+        # Payment
+        self.kid = kid
+        self.bank_account = bank_account
+        # Document type
+        self.document_type = document_type
+        # Extraction metadata
+        self.extraction_provider = extraction_provider
+        self.extraction_status = extraction_status
+        self.extracted_at = extracted_at
+        self.field_suggestions = field_suggestions or {}
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
 
@@ -531,6 +571,26 @@ class AccountingDocument:
             "amount": self.amount,
             "voucher_date": self.voucher_date,
             "description": self.description,
+            # Supplier fields
+            "supplier_name": self.supplier_name,
+            "supplier_org_number": self.supplier_org_number,
+            # Invoice fields
+            "invoice_number": self.invoice_number,
+            "due_date": self.due_date,
+            # Amount breakdown
+            "amount_excluding_vat": self.amount_excluding_vat,
+            "vat_amount": self.vat_amount,
+            "currency": self.currency,
+            # Payment info
+            "kid": self.kid,
+            "bank_account": self.bank_account,
+            # Document type
+            "document_type": self.document_type,
+            # Extraction metadata (not shown in default API responses)
+            "extraction_provider": self.extraction_provider,
+            "extraction_status": self.extraction_status,
+            "extracted_at": self.extracted_at,
+            "field_suggestions": self.field_suggestions,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
         }
