@@ -47,6 +47,8 @@ class User:
         status: Optional[str] = None,
         email_normalized: Optional[str] = None,
         identity_version: int = 1,
+        password_hash: Optional[str] = None,
+        password_set_at: Optional[datetime] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ):
@@ -76,6 +78,8 @@ class User:
         self.is_active = is_active
         self.status = status or ("active" if is_active else "disabled")
         self.identity_version = identity_version
+        self.password_hash = password_hash
+        self.password_set_at = password_set_at
         self.created_at = created_at or datetime.now(timezone.utc)
         self.updated_at = updated_at or self.created_at
         self.type = "user"  # Document type discriminator
@@ -110,6 +114,8 @@ class User:
             "onboarding_completed_at": self.onboarding_completed_at.isoformat() if isinstance(self.onboarding_completed_at, datetime) else self.onboarding_completed_at,
             "is_active": self.is_active,
             "identity_version": self.identity_version,
+            "password_hash": self.password_hash,
+            "password_set_at": self.password_set_at.isoformat() if isinstance(self.password_set_at, datetime) else self.password_set_at,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
         }
@@ -144,6 +150,8 @@ class User:
             onboarding_completed_at=datetime.fromisoformat(data.get("onboarding_completed_at")) if data.get("onboarding_completed_at") else None,
             is_active=data.get("is_active", True),
             identity_version=data.get("identity_version", 1),
+            password_hash=data.get("password_hash"),
+            password_set_at=datetime.fromisoformat(data.get("password_set_at")) if data.get("password_set_at") else None,
             created_at=datetime.fromisoformat(data.get("created_at")) if data.get("created_at") else None,
             updated_at=datetime.fromisoformat(data.get("updated_at")) if data.get("updated_at") else None,
         )

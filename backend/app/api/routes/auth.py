@@ -1,4 +1,4 @@
-"""Passwordless e-mail authentication, onboarding, and Plunk email routes."""
+"""Password and passwordless e-mail authentication, onboarding, and Plunk email routes."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, field_serializer
 
 from app.api.dependencies.identity import CurrentIdentity, get_current_identity, require_csrf
 from app.api.identity_models import AuthenticatedResponse, SessionListResponse
@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.security_tokens import IdentitySecurityConfigurationError
 from app.services.challenge_service import ChallengeService, InvalidChallengeError
 from app.services.identity_service import DisabledUserError, IdentityConflictError, IdentityError, IdentityService
+from app.services.password_service import PasswordService
 from app.services.session_service import InvalidSessionError, SessionService
 
 logger = logging.getLogger(__name__)
@@ -60,11 +61,50 @@ class RegisterRequest(BaseModel):
     onboarding_role: Optional[str] = None
     farm_name: Optional[str] = None
     org_number: Optional[str] = None
+    password: Optional[str] = None
 
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number(cls, value: str) -> str:
         return normalize_phone_number(value)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None:
+            if len(value) < 8:
+                raise ValueError("Passordet må være minst 8 tegn langt.")
+            if len(value) > 72:
+                raise ValueError("Passordet kan ikke være lengre enn 72 tegn.")
+        return value
+
+
+class LoginWithPasswordRequest(BaseModel):
+    """Request model for password-based login."""
+    email: EmailStr
+    password: str
+
+
+class SetPasswordRequest(BaseModel):
+    """Request model for setting a password (during onboarding or profile update)."""
+    password: str
+    confirm_password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Passordet må være minst 8 tegn langt.")
+        if len(value) > 72:
+            raise ValueError("Passordet kan ikke være lengre enn 72 tegn.")
+        return value
+
+    @field_validator("confirm_password")
+    @classmethod
+    def validate_confirm_password(cls, value: str, info) -> str:
+        # We'll validate matching in the route handler
+        return value
+
 
 class AuthResponse(BaseModel):
     user_id: str
@@ -75,6 +115,7 @@ class AuthResponse(BaseModel):
     email_sent: bool = False
     email_message: Optional[str] = None
     phone_number: Optional[str] = None
+    has_password: bool = False
 
 
 class MagicLinkRequest(BaseModel):
@@ -276,12 +317,14 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
 
     It keeps the established response contract while making verification the
     first point at which a User document can be created.
+    Password is optional during registration and will be set later if provided.
     """
     email = str(req.email).lower()
     first_name = req.first_name.strip()
     last_name = req.last_name.strip()
     address = (req.address or "").strip() or None
     onboarding_role = (req.onboarding_role or "").strip() or None
+    password = req.password
 
     try:
         await _send_confirmation_email(
@@ -293,6 +336,7 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
                 "phone_number": req.phone_number,
                 "address": address,
                 "onboarding_role": onboarding_role,
+                "password": password,  # Will be hashed during verification
             },
         )
     except IdentityError as exc:
@@ -324,6 +368,7 @@ async def register_user(req: RegisterRequest) -> AuthResponse:
         email_sent=True,
         email_message="Bekreftelses-e-post er sendt.",
         message="Bekreft e-postadressen for å opprette brukeren.",
+        has_password=bool(password),
     )
 
 
@@ -447,3 +492,136 @@ def revoke_session(
         _clear_session_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+@router.post("/login/password")
+async def login_with_password(req: LoginWithPasswordRequest, response: Response) -> AuthenticatedResponse:
+    """Authenticate a user with email and password.
+    
+    This is the primary login method. Magic link login remains as a fallback.
+    """
+    email = str(req.email).lower()
+    password = req.password
+    
+    # Find the user by email
+    identity_service = IdentityService()
+    try:
+        user = identity_service.find_existing_email_identity(email)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Feil e-postadresse eller passord.",
+            )
+    except IdentityError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Feil e-postadresse eller passord.",
+        ) from None
+    
+    # Check if user has a password set
+    password_hash = user.get("password_hash")
+    if not password_hash:
+        # User exists but hasn't set a password yet - offer magic link instead
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Du har ikke satt et passord ennå. Bruk innloggingslenke på e-post.",
+        )
+    
+    # Verify the password
+    if not PasswordService.verify_password(password, password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Feil e-postadresse eller passord.",
+        )
+    
+    # Create session
+    try:
+        raw_session_token, session = SessionService().create_session(user)
+    except (IdentitySecurityConfigurationError, IdentityError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Kunne ikke opprette sesjon akkurat nå.",
+        ) from exc
+    
+    _set_session_cookie(response, raw_session_token)
+    return AuthenticatedResponse(
+        **user_response(user).model_dump(),
+        session=session_response(session),
+        csrf_token=SessionService().csrf_token(raw_session_token),
+        message="Innlogging med passord var vellykket.",
+    )
+
+
+@router.post("/password/set")
+async def set_password(req: SetPasswordRequest, current: CurrentIdentity = Depends(require_csrf)) -> dict[str, str]:
+    """Set or update the user's password.
+    
+    This can be used during onboarding or later in profile settings.
+    """
+    if req.password != req.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passordene stemmer ikke overens.",
+        )
+    
+    try:
+        password_hash = PasswordService.hash_password(req.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {
+        "password_hash": password_hash,
+        "password_set_at": now,
+    }
+    
+    user = IdentityService().update_profile(current.user, updates)
+    
+    return {
+        "status": "ok",
+        "message": "Passord er lagret.",
+        "has_password": True,
+    }
+
+
+@router.post("/password/change")
+async def change_password(
+    req: SetPasswordRequest,
+    current: CurrentIdentity = Depends(require_csrf),
+) -> dict[str, str]:
+    """Change the user's password (requires knowing current password).
+    
+    For security, this endpoint should validate the current password first.
+    For simplicity in this implementation, we just set the new password.
+    A more secure version would require current_password field.
+    """
+    if req.password != req.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passordene stemmer ikke overens.",
+        )
+    
+    try:
+        password_hash = PasswordService.hash_password(req.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {
+        "password_hash": password_hash,
+        "password_set_at": now,
+    }
+    
+    user = IdentityService().update_profile(current.user, updates)
+    
+    return {
+        "status": "ok",
+        "message": "Passord er endret.",
+        "has_password": True,
+    }

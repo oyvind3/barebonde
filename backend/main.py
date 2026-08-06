@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes import health, farms, accounting, auth, me, subscriptions, profile, onboarding, settings as farm_settings, invitations
+from app.middleware.rate_limiter import setup_rate_limiting
 
 
 app = FastAPI(
@@ -24,6 +25,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting - critical for production security
+setup_rate_limiting(app)
 
 # Include routers
 app.include_router(health.router, tags=["Health"])

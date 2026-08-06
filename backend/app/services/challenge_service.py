@@ -108,6 +108,16 @@ class ChallengeService:
             )
             allowed_profile_fields = {"first_name", "last_name", "phone_number", "address", "onboarding_role"}
             profile_updates = {key: value for key, value in profile.items() if key in allowed_profile_fields and value is not None}
+            
+            # Handle password if provided during registration
+            password = profile.get("password")
+            if password:
+                from app.services.password_service import PasswordService
+                from datetime import datetime, timezone
+                password_hash = PasswordService.hash_password(password)
+                profile_updates["password_hash"] = password_hash
+                profile_updates["password_set_at"] = datetime.now(timezone.utc).isoformat()
+            
             if profile_updates:
                 user = self.identity.update_profile(user, profile_updates)
         else:
