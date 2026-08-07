@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
@@ -14,55 +14,196 @@ type Account = {
   simple: boolean
 }
 
-type GlossaryTerm = {
-  term: string
-  description: string
+type FieldSuggestion = {
+  value: unknown
+  confidence: number | null
+  source: string | null
+  warnings: string[]
 }
 
-type UploadedVoucher = {
+type Voucher = {
   id: string
+  farm_id: string
   file_name: string
+  content_type: string
   status: string
   amount: number
   account_code: string | null
+  mva_code: string | null
   voucher_date: string
-  description?: string | null
-  ocr_text_preview?: string | null
-  ocr_provider?: string | null
-  ocr_confidence?: number | null
-  ocr_suggested_amount?: number | null
-  ocr_suggested_date?: string | null
-  ocr_suggested_supplier?: string | null
+  description: string | null
+  supplier_name: string | null
+  supplier_org_number: string | null
+  invoice_number: string | null
+  due_date: string | null
+  amount_excluding_vat: number | null
+  vat_amount: number | null
+  currency: string
+  kid: string | null
+  bank_account: string | null
+  document_type: string
+  field_suggestions: Record<string, FieldSuggestion | null>
+  ocr_warnings: string[]
+  extraction_status: string | null
+}
+
+type FormState = {
+  document_type: string
+  supplier_name: string
+  supplier_org_number: string
+  invoice_number: string
+  voucher_date: string
+  due_date: string
+  description: string
+  amount: string
+  amount_excluding_vat: string
+  vat_amount: string
+  currency: string
+  kid: string
+  bank_account: string
+  account_code: string
+  mva_code: string
+  transaction_type: 'expense' | 'income'
 }
 
 const FARM_ID_KEY = 'barebonde_active_farm_id'
+const CONFIDENCE_THRESHOLD = 0.85
+
+// Maps form fields to the corresponding OCR field_suggestions key.
+const SUGGESTION_MAP: Partial<Record<keyof FormState, string>> = {
+  supplier_name: 'supplier_name',
+  supplier_org_number: 'org_number',
+  invoice_number: 'invoice_number',
+  voucher_date: 'invoice_date',
+  due_date: 'due_date',
+  amount: 'amount_total',
+  vat_amount: 'amount_vat',
+  currency: 'currency',
+  kid: 'kid',
+  bank_account: 'bank_account',
+}
+
+const REQUIRED_FIELDS: Array<keyof FormState> = ['amount', 'voucher_date', 'description', 'account_code']
+
+const STATUS_LABELS: Record<string, string> = {
+  mottatt: 'Mottatt',
+  needs_review: 'Trenger kontroll',
+  ready: 'Klar for bokføring',
+  ført: 'Ført',
+}
+
+function emptyForm(): FormState {
+  return {
+    document_type: 'invoice',
+    supplier_name: '',
+    supplier_org_number: '',
+    invoice_number: '',
+    voucher_date: new Date().toISOString().slice(0, 10),
+    due_date: '',
+    description: '',
+    amount: '',
+    amount_excluding_vat: '',
+    vat_amount: '',
+    currency: 'NOK',
+    kid: '',
+    bank_account: '',
+    account_code: '',
+    mva_code: '25',
+    transaction_type: 'expense',
+  }
+}
+
+function formatNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined) return ''
+  return String(value)
+}
+
+function parseAmount(value: string): number {
+  const normalized = value.replace(/\s/g, '').replace(',', '.')
+  if (!normalized) return NaN
+  return Number(normalized)
+}
+
+function parseOptionalNumber(value: string): number | undefined {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const parsed = parseAmount(trimmed)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function formFromVoucher(voucher: Voucher): FormState {
+  return {
+    document_type: voucher.document_type || 'invoice',
+    supplier_name: voucher.supplier_name || '',
+    supplier_org_number: voucher.supplier_org_number || '',
+    invoice_number: voucher.invoice_number || '',
+    voucher_date: voucher.voucher_date || new Date().toISOString().slice(0, 10),
+    due_date: voucher.due_date || '',
+    description: voucher.description || '',
+    amount: voucher.amount ? String(voucher.amount) : formatNumber(voucher.field_suggestions?.amount_total?.value as number | null | undefined) || '',
+    amount_excluding_vat: formatNumber(voucher.amount_excluding_vat),
+    vat_amount: formatNumber(voucher.vat_amount),
+    currency: voucher.currency || 'NOK',
+    kid: voucher.kid || '',
+    bank_account: voucher.bank_account || '',
+    account_code: voucher.account_code || '',
+    mva_code: voucher.mva_code || '25',
+    transaction_type: 'expense',
+  }
+}
+
+const inputBase = 'w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-bonde-green/40'
+
+function inputClass(needsReview: boolean): string {
+  return `${inputBase} ${needsReview ? 'border-amber-400 bg-amber-50' : 'border-stone-300 bg-white'}`
+}
+
+function FieldLabel({ label, needsReview }: { label: string; needsReview: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2 mb-1">
+      <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold">{label}</label>
+      {needsReview && (
+        <span className="shrink-0 text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5">
+          Kontroller
+        </span>
+      )}
+    </div>
+  )
+}
 
 export default function NewVoucherPage() {
+  const [authReady, setAuthReady] = useState(false)
   const [farmId, setFarmId] = useState('')
   const [simpleMode, setSimpleMode] = useState(true)
-  const [search, setSearch] = useState('')
+  const [accountSearch, setAccountSearch] = useState('')
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [glossary, setGlossary] = useState<GlossaryTerm[]>([])
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState('')
-  const [description, setDescription] = useState('')
-  const [voucherDate, setVoucherDate] = useState(new Date().toISOString().slice(0, 10))
-  const [amount, setAmount] = useState('')
-  const [transactionType, setTransactionType] = useState<'expense' | 'income'>('expense')
-  const [accountCode, setAccountCode] = useState('')
-  const [mvaCode, setMvaCode] = useState('25')
+  const [localPreviewUrl, setLocalPreviewUrl] = useState('')
+  const [documentUrl, setDocumentUrl] = useState('')
+  const [documentContentType, setDocumentContentType] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  const [voucher, setVoucher] = useState<Voucher | null>(null)
+  const [form, setForm] = useState<FormState>(emptyForm())
+  const [touched, setTouched] = useState<Set<string>>(new Set())
+
   const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [booking, setBooking] = useState(false)
+  const [booked, setBooked] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
-  const [uploadedVoucher, setUploadedVoucher] = useState<UploadedVoucher | null>(null)
 
-  const [cameraReady, setCameraReady] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraReady, setCameraReady] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
+  const busy = uploading || saving || booking
+
+  // --- Identity / Farm scope ---
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
     bootstrapIdentity(storedFarmId)
@@ -73,57 +214,82 @@ export default function NewVoucherPage() {
         else window.localStorage.removeItem(FARM_ID_KEY)
       })
       .catch(() => setFarmId(''))
+      .finally(() => setAuthReady(true))
   }, [])
 
+  // --- Account catalog ---
   useEffect(() => {
+    let cancelled = false
     const run = async () => {
       try {
-        const response = await apiFetch(`/api/accounting/accounts?query=${encodeURIComponent(search)}&simple_mode=${simpleMode}`)
-        if (!response.ok) {
-          throw new Error(await apiErrorMessage(response, 'Klarte ikke hente kontoforslag'))
-        }
+        const response = await apiFetch(
+          `/api/accounting/accounts?query=${encodeURIComponent(accountSearch)}&simple_mode=${simpleMode}`
+        )
+        if (!response.ok) return
         const data = await response.json()
-        setAccounts(data.accounts || [])
-        setGlossary(data.glossary || [])
-        if (!accountCode && data.accounts?.length) {
-          setAccountCode(data.accounts[0].code)
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Ukjent feil')
+        if (cancelled) return
+        const list: Account[] = data.accounts || []
+        setAccounts(list)
+        setForm((prev) => (prev.account_code || !list.length ? prev : { ...prev, account_code: list[0].code }))
+      } catch {
+        // Account catalog is supplementary; ignore fetch errors here.
       }
     }
     run()
-  }, [search, simpleMode, accountCode])
+    return () => {
+      cancelled = true
+    }
+  }, [accountSearch, simpleMode])
+
+  // --- Cleanup ---
+  useEffect(() => {
+    return () => {
+      stopCamera()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl)
-      }
-      stopCamera()
+      if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl)
     }
-  }, [previewUrl])
+  }, [localPreviewUrl])
 
-  const imagePreview = useMemo(() => {
-    if (!selectedFile) {
-      return false
+  useEffect(() => {
+    return () => {
+      if (documentUrl) URL.revokeObjectURL(documentUrl)
     }
-    return selectedFile.type.startsWith('image/')
-  }, [selectedFile])
+  }, [documentUrl])
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+    setCameraOpen(false)
+    setCameraReady(false)
+  }, [])
 
   const handleFileChange = (file: File | null) => {
     setSelectedFile(file)
-    setUploadedVoucher(null)
+    setVoucher(null)
+    setBooked(false)
     setMessage('')
     setError('')
+    setTouched(new Set())
 
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl)
-      setPreviewUrl('')
+    if (localPreviewUrl) {
+      URL.revokeObjectURL(localPreviewUrl)
+      setLocalPreviewUrl('')
+    }
+    if (documentUrl) {
+      URL.revokeObjectURL(documentUrl)
+      setDocumentUrl('')
+      setDocumentContentType('')
     }
 
     if (file && file.type.startsWith('image/')) {
-      setPreviewUrl(URL.createObjectURL(file))
+      setLocalPreviewUrl(URL.createObjectURL(file))
     }
   }
 
@@ -133,7 +299,6 @@ export default function NewVoucherPage() {
       setError('Kamera støttes ikke i denne nettleseren.')
       return
     }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
       streamRef.current = stream
@@ -142,53 +307,61 @@ export default function NewVoucherPage() {
       }
       setCameraOpen(true)
       setCameraReady(true)
-    } catch (err) {
+    } catch {
       setError('Klarte ikke åpne kamera. Bruk filopplasting i stedet.')
     }
   }
 
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-    }
-    setCameraOpen(false)
-    setCameraReady(false)
-  }
-
   const capturePhoto = async () => {
-    if (!videoRef.current || !canvasRef.current) {
-      return
-    }
-
+    if (!videoRef.current || !canvasRef.current) return
     const video = videoRef.current
     const canvas = canvasRef.current
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
     const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      return
-    }
-
+    if (!ctx) return
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((result) => resolve(result), 'image/jpeg', 0.9))
     if (!blob) {
-      setError('Klarte ikke ta bilde')
+      setError('Klarte ikke ta bilde.')
       return
     }
-
     const file = new File([blob], `kamera-${Date.now()}.jpg`, { type: 'image/jpeg' })
     handleFileChange(file)
     stopCamera()
   }
 
+  const loadDocumentPreview = useCallback(
+    async (farm: string, voucherId: string) => {
+      setPreviewLoading(true)
+      try {
+        const response = await apiFetch(`/api/farms/${encodeURIComponent(farm)}/documents/${encodeURIComponent(voucherId)}/download`)
+        if (!response.ok) return
+        const blob = await response.blob()
+        const url = URL.createObjectURL(blob)
+        setDocumentUrl((previous) => {
+          if (previous) URL.revokeObjectURL(previous)
+          return url
+        })
+        setDocumentContentType(blob.type || '')
+      } catch {
+        // Preview is best-effort; the form still works without it.
+      } finally {
+        setPreviewLoading(false)
+      }
+    },
+    []
+  )
+
+  // --- Step 2: Upload ---
   const uploadVoucher = async () => {
+    if (busy) return
     if (!farmId) {
       setError('Du må sette opp gård før opplasting.')
       return
     }
     if (!selectedFile) {
-      setError('Velg en fil eller ta et bilde først.')
+      setError('Velg en PDF eller et bilde først.')
       return
     }
 
@@ -199,8 +372,6 @@ export default function NewVoucherPage() {
     try {
       const formData = new FormData()
       formData.append('file', selectedFile)
-      formData.append('description', description)
-      formData.append('voucher_date', voucherDate)
       formData.append('simple_mode', String(simpleMode))
 
       const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/vouchers`, {
@@ -209,38 +380,128 @@ export default function NewVoucherPage() {
       })
 
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
-        throw new Error(body.detail || 'Opplasting feilet')
+        throw new Error(await apiErrorMessage(response, 'Opplasting feilet.'))
       }
 
-      const data = (await response.json()) as UploadedVoucher
-      setUploadedVoucher(data)
-      if (!amount && data.ocr_suggested_amount) {
-        setAmount(String(data.ocr_suggested_amount))
-      }
-      if (data.ocr_suggested_date) {
-        setVoucherDate(data.ocr_suggested_date)
-      }
-      if (!description && data.ocr_suggested_supplier) {
-        setDescription(data.ocr_suggested_supplier)
-      }
-      setMessage('Bilag lastet opp. Fyll inn konto og beløp for å føre.')
+      const data = (await response.json()) as Voucher
+      setVoucher(data)
+      setForm(formFromVoucher(data))
+      setTouched(new Set())
+      setBooked(false)
+      setMessage('Dokumentet er lastet opp. Kontroller forslagene før bokføring.')
+      void loadDocumentPreview(farmId, data.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ukjent feil')
+      setError(err instanceof Error ? err.message : 'Ukjent feil ved opplasting.')
     } finally {
       setUploading(false)
     }
   }
 
-  const bookVoucher = async () => {
-    if (!uploadedVoucher) {
-      setError('Last opp bilag først.')
-      return
-    }
+  // --- "Kontroller" markers ---
+  const fieldNeedsReview = useCallback(
+    (key: keyof FormState): boolean => {
+      if (!voucher || booked) return false
+      if (touched.has(key)) return false
+      const value = String(form[key] ?? '').trim()
+      const suggestionKey = SUGGESTION_MAP[key]
 
-    const parsedAmount = Number(amount.replace(',', '.'))
+      if (suggestionKey) {
+        const suggestion = voucher.field_suggestions?.[suggestionKey]
+        if (!value) return true // OCR found nothing here – user must fill it in
+        if (suggestion) {
+          if (suggestion.warnings && suggestion.warnings.length > 0) return true
+          if (typeof suggestion.confidence === 'number' && suggestion.confidence < CONFIDENCE_THRESHOLD) return true
+        }
+        return false
+      }
+
+      // Fields without OCR suggestions: flag required empties only.
+      if (REQUIRED_FIELDS.includes(key) && !value) return true
+      return false
+    },
+    [voucher, booked, touched, form]
+  )
+
+  const reviewCount = useMemo(() => {
+    if (!voucher || booked) return 0
+    return (Object.keys(form) as Array<keyof FormState>).filter((key) => fieldNeedsReview(key)).length
+  }, [voucher, booked, form, fieldNeedsReview])
+
+  const setField = (key: keyof FormState, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+    setTouched((prev) => {
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
+  }
+
+  const buildPatchPayload = () => {
+    const payload: Record<string, unknown> = {
+      voucher_date: form.voucher_date,
+      description: form.description,
+      supplier_name: form.supplier_name,
+      supplier_org_number: form.supplier_org_number,
+      invoice_number: form.invoice_number,
+      due_date: form.due_date,
+      currency: form.currency.trim() || 'NOK',
+      kid: form.kid,
+      bank_account: form.bank_account,
+      document_type: form.document_type,
+      account_code: form.account_code,
+      mva_code: form.mva_code,
+    }
+    const amountExcl = parseOptionalNumber(form.amount_excluding_vat)
+    if (amountExcl !== undefined) payload.amount_excluding_vat = amountExcl
+    const vatAmount = parseOptionalNumber(form.vat_amount)
+    if (vatAmount !== undefined) payload.vat_amount = vatAmount
+    return payload
+  }
+
+  // --- Step 8: Save user-confirmed values ---
+  const handleSave = async () => {
+    if (busy || !voucher || !farmId) return
+    setSaving(true)
+    setError('')
+    setMessage('')
+    try {
+      const parsedAmount = parseAmount(form.amount)
+      const payload = buildPatchPayload()
+      if (Number.isFinite(parsedAmount) && parsedAmount > 0) {
+        payload.amount = parsedAmount
+      }
+      const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/vouchers/${encodeURIComponent(voucher.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        throw new Error(await apiErrorMessage(response, 'Kunne ikke lagre verdiene.'))
+      }
+      const updated = (await response.json()) as Voucher
+      setVoucher(updated)
+      setMessage('Verdiene er lagret.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ukjent feil ved lagring.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // --- Step 9: Book ---
+  const handleBook = async () => {
+    if (busy || !voucher || !farmId) return
+
+    const validationErrors: string[] = []
+    const parsedAmount = parseAmount(form.amount)
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      setError('Beløp må være større enn 0.')
+      validationErrors.push('Totalbeløp må være et tall større enn 0.')
+    }
+    if (!form.voucher_date) validationErrors.push('Fakturadato er påkrevd.')
+    if (!form.description.trim()) validationErrors.push('Beskrivelse er påkrevd.')
+    if (!form.account_code) validationErrors.push('Regnskapskonto er påkrevd.')
+    if (validationErrors.length) {
+      setError(validationErrors.join(' '))
       return
     }
 
@@ -249,31 +510,61 @@ export default function NewVoucherPage() {
     setMessage('')
 
     try {
-      const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/vouchers/${encodeURIComponent(uploadedVoucher.id)}/book`, {
-        method: 'POST',
+      // 1) Persist all user-confirmed values (authoritative).
+      const patchResponse = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/vouchers/${encodeURIComponent(voucher.id)}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: parsedAmount,
-          account_code: accountCode,
-          mva_code: mvaCode,
-          transaction_type: transactionType,
-          description,
-          category: 'Drift',
-        }),
+        body: JSON.stringify({ ...buildPatchPayload(), amount: parsedAmount }),
       })
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
-        throw new Error(body.detail || 'Føring feilet')
+      if (!patchResponse.ok) {
+        throw new Error(await apiErrorMessage(patchResponse, 'Kunne ikke lagre verdiene før bokføring.'))
       }
 
-      setMessage('Bilaget er ført. Du finner det i bilagslisten.')
+      // 2) Book the voucher.
+      const bookResponse = await apiFetch(
+        `/api/farms/${encodeURIComponent(farmId)}/vouchers/${encodeURIComponent(voucher.id)}/book`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: parsedAmount,
+            account_code: form.account_code,
+            mva_code: form.mva_code,
+            transaction_type: form.transaction_type,
+            category: 'Drift',
+            description: form.description,
+          }),
+        }
+      )
+      if (!bookResponse.ok) {
+        throw new Error(await apiErrorMessage(bookResponse, 'Bokføring feilet.'))
+      }
+
+      const updated = (await bookResponse.json()) as Voucher
+      setVoucher(updated)
+      setBooked(true)
+      setMessage('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ukjent feil')
+      setError(err instanceof Error ? err.message : 'Ukjent feil ved bokføring.')
     } finally {
       setBooking(false)
     }
   }
+
+  const resetFlow = () => {
+    handleFileChange(null)
+    setForm(emptyForm())
+    setTouched(new Set())
+    setVoucher(null)
+    setBooked(false)
+    setMessage('')
+    setError('')
+    if (selectedFile) setSelectedFile(null)
+  }
+
+  const statusLabel = voucher ? STATUS_LABELS[voucher.status] || voucher.status : ''
+  const isPdfPreview = documentContentType === 'application/pdf'
+  const ocrFailed = voucher?.extraction_status === 'failed'
 
   return (
     <div className="min-h-screen bg-bonde-oat flex flex-col font-sans">
@@ -283,15 +574,21 @@ export default function NewVoucherPage() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl sm:text-4xl font-serif text-stone-900">Nytt bilag</h1>
-            <p className="text-stone-600 text-sm mt-1">Ta bilde, last opp fil og før bilaget i samme flyt.</p>
+            <p className="text-stone-600 text-sm mt-1">Last opp faktura eller kvittering, kontroller forslagene og bokfør bilaget.</p>
           </div>
           <Button href="/bilag" variant="outline" showArrow>
             TIL BILAGSLISTE
           </Button>
         </div>
 
-        {!farmId && (
-          <Card hoverEffect={false} className="p-6 bg-white mb-8">
+        {!authReady && (
+          <Card hoverEffect={false} className="p-6 bg-white">
+            <p className="text-sm text-stone-600">Henter sesjon...</p>
+          </Card>
+        )}
+
+        {authReady && !farmId && (
+          <Card hoverEffect={false} className="p-6 bg-white">
             <p className="text-sm text-stone-700">Du må sette opp gård før du kan føre bilag.</p>
             <div className="mt-4">
               <Button href="/farm/setup" variant="outline" showArrow>
@@ -301,238 +598,446 @@ export default function NewVoucherPage() {
           </Card>
         )}
 
-        {farmId && (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="xl:col-span-2 space-y-6">
-              <Card hoverEffect={false} className="p-6 bg-white">
-                <h2 className="text-lg font-semibold text-stone-900 mb-4">1. Legg ved bilag</h2>
+        {authReady && farmId && booked && voucher && (
+          <Card hoverEffect={false} className="p-8 bg-white max-w-2xl mx-auto text-center">
+            <div className="mx-auto w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mb-4">
+              <span className="text-emerald-700 text-2xl" aria-hidden>
+                ✓
+              </span>
+            </div>
+            <h2 className="text-2xl font-serif text-stone-900 mb-2">Bilaget er ført</h2>
+            <p className="text-sm text-stone-600 mb-6">
+              {voucher.file_name} ble bokført på konto {voucher.account_code} med beløp{' '}
+              {new Intl.NumberFormat('nb-NO', { style: 'currency', currency: voucher.currency || 'NOK' }).format(voucher.amount)}.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Button href="/bilag" variant="primary" showArrow>
+                SE BILAGSLISTEN
+              </Button>
+              <Button variant="outline" onClick={resetFlow}>
+                FØR NYTT BILAG
+              </Button>
+            </div>
+          </Card>
+        )}
 
-                <div className="flex flex-wrap gap-3 mb-4">
-                  <label className="inline-flex">
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf,text/plain,text/csv,application/json,application/xml,.txt,.csv,.json,.xml"
-                      className="hidden"
-                      onChange={(event) => handleFileChange(event.target.files?.[0] || null)}
-                    />
-                    <span className="cursor-pointer bg-white border border-stone-300 hover:border-bonde-green px-4 py-2 rounded-lg text-sm font-semibold text-stone-800">
-                      Velg bilde/PDF/tekstfil
-                    </span>
-                  </label>
+        {authReady && farmId && !booked && (
+          <div className="space-y-6">
+            {/* Step 1: Upload */}
+            <Card hoverEffect={false} className="p-6 bg-white">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h2 className="text-lg font-semibold text-stone-900">1. Last opp bilag</h2>
+                {voucher && (
+                  <span className="text-xs font-semibold bg-bonde-light text-bonde-earth rounded-full px-3 py-1">
+                    {statusLabel}
+                  </span>
+                )}
+              </div>
 
-                  <button
-                    type="button"
-                    onClick={cameraOpen ? stopCamera : startCamera}
-                    className="bg-bonde-light text-bonde-earth hover:bg-emerald-100 px-4 py-2 rounded-lg text-sm font-semibold"
+              <div className="flex flex-wrap gap-3">
+                <label className="inline-flex">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                    disabled={busy}
+                    onChange={(event) => handleFileChange(event.target.files?.[0] || null)}
+                  />
+                  <span
+                    className={`cursor-pointer bg-white border border-stone-300 hover:border-bonde-green px-4 py-2 rounded-lg text-sm font-semibold text-stone-800 ${busy ? 'opacity-50 pointer-events-none' : ''}`}
                   >
-                    {cameraOpen ? 'Stopp kamera' : 'Ta bilde med kamera'}
-                  </button>
-                </div>
+                    Velg PDF eller bilde
+                  </span>
+                </label>
 
-                {cameraOpen && (
-                  <div className="border border-stone-200 rounded-xl p-4 bg-stone-50">
-                    <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg bg-black max-h-[420px]" />
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={capturePhoto}
-                        disabled={!cameraReady}
-                        className="bg-bonde-green text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-                      >
-                        Ta bilde nå
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={cameraOpen ? stopCamera : startCamera}
+                  disabled={busy}
+                  className="bg-bonde-light text-bonde-earth hover:bg-emerald-100 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+                >
+                  {cameraOpen ? 'Stopp kamera' : 'Ta bilde med kamera'}
+                </button>
+              </div>
 
-                <canvas ref={canvasRef} className="hidden" />
-
-                {selectedFile && (
-                  <div className="mt-4 border border-stone-200 rounded-xl p-4">
-                    <p className="text-sm text-stone-700">
-                      Valgt fil: <span className="font-semibold">{selectedFile.name}</span>
-                    </p>
-                    {imagePreview && previewUrl && (
-                      <Image src={previewUrl} alt="Forhåndsvisning bilag" width={720} height={480} unoptimized className="mt-3 max-h-72 rounded-lg object-contain" />
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold mb-1">Beskrivelse</label>
-                    <input
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-                      placeholder="F.eks. Gjødsel kjøpt Felleskjøpet"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold mb-1">Bilagsdato</label>
-                    <input
-                      type="date"
-                      value={voucherDate}
-                      onChange={(event) => setVoucherDate(event.target.value)}
-                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-                    />
+              {cameraOpen && (
+                <div className="mt-4 border border-stone-200 rounded-xl p-4 bg-stone-50">
+                  <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg bg-black max-h-[420px]" />
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={capturePhoto}
+                      disabled={!cameraReady || busy}
+                      className="bg-bonde-green text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+                    >
+                      Ta bilde nå
+                    </button>
                   </div>
                 </div>
+              )}
 
+              <canvas ref={canvasRef} className="hidden" />
+
+              {selectedFile && !voucher && (
+                <div className="mt-4 border border-stone-200 rounded-xl p-4">
+                  <p className="text-sm text-stone-700">
+                    Valgt fil: <span className="font-semibold">{selectedFile.name}</span>
+                  </p>
+                  {localPreviewUrl && (
+                    <Image
+                      src={localPreviewUrl}
+                      alt="Forhåndsvisning bilag"
+                      width={720}
+                      height={480}
+                      unoptimized
+                      className="mt-3 max-h-72 rounded-lg object-contain"
+                    />
+                  )}
+                </div>
+              )}
+
+              {selectedFile && !voucher && (
                 <div className="mt-4">
                   <button
                     type="button"
                     onClick={uploadVoucher}
-                    disabled={uploading}
+                    disabled={busy}
                     className="bg-bonde-green text-white px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
                   >
-                    {uploading ? 'Laster opp...' : 'Last opp bilag'}
+                    {uploading ? 'Laster opp og leser dokumentet...' : 'Last opp bilag'}
                   </button>
+                  {uploading && (
+                    <p className="text-xs text-stone-500 mt-2" role="status">
+                      Behandler dokumentet. OCR leser leverandør, beløp og datoer – dette kan ta noen sekunder.
+                    </p>
+                  )}
                 </div>
-              </Card>
+              )}
+            </Card>
 
-              <Card hoverEffect={false} className="p-6 bg-white">
-                <h2 className="text-lg font-semibold text-stone-900 mb-4">2. Før bilaget</h2>
+            {voucher && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* Document preview */}
+                <Card hoverEffect={false} className="p-6 bg-white lg:sticky lg:top-6">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <h2 className="text-lg font-semibold text-stone-900">2. Dokument</h2>
+                    <a
+                      href="#"
+                      onClick={(event) => {
+                        event.preventDefault()
+                        void loadDocumentPreview(farmId, voucher.id)
+                      }}
+                      className="text-xs font-semibold text-bonde-green hover:underline"
+                    >
+                      Last inn dokument på nytt
+                    </a>
+                  </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold mb-1">Beløp (NOK)</label>
-                    <input
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-                      placeholder="0"
+                  <p className="text-sm text-stone-600 mb-3 truncate">{voucher.file_name}</p>
+
+                  {previewLoading && (
+                    <div className="border border-stone-200 rounded-xl p-8 text-center" role="status">
+                      <p className="text-sm text-stone-500">Henter dokument...</p>
+                    </div>
+                  )}
+
+                  {!previewLoading && documentUrl && isPdfPreview && (
+                    <iframe src={documentUrl} title={voucher.file_name} className="w-full h-[560px] rounded-xl border border-stone-200" />
+                  )}
+
+                  {!previewLoading && documentUrl && !isPdfPreview && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={documentUrl} alt={voucher.file_name} className="w-full max-h-[560px] object-contain rounded-xl border border-stone-200 bg-stone-50" />
+                  )}
+
+                  {!previewLoading && !documentUrl && localPreviewUrl && (
+                    <Image
+                      src={localPreviewUrl}
+                      alt="Forhåndsvisning bilag"
+                      width={720}
+                      height={480}
+                      unoptimized
+                      className="w-full max-h-[560px] rounded-xl object-contain border border-stone-200 bg-stone-50"
                     />
-                  </div>
+                  )}
 
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold mb-1">Type</label>
-                    <select
-                      value={transactionType}
-                      onChange={(event) => setTransactionType(event.target.value as 'expense' | 'income')}
-                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-                    >
-                      <option value="expense">Utgift</option>
-                      <option value="income">Inntekt</option>
-                    </select>
-                  </div>
+                  {!previewLoading && !documentUrl && !localPreviewUrl && (
+                    <div className="border border-dashed border-stone-300 rounded-xl p-8 text-center">
+                      <p className="text-sm text-stone-500">Forhåndsvisning er ikke tilgjengelig for denne filtypen.</p>
+                    </div>
+                  )}
 
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold mb-1">MVA-kode</label>
-                    <select
-                      value={mvaCode}
-                      onChange={(event) => setMvaCode(event.target.value)}
-                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-                    >
-                      <option value="25">25%</option>
-                      <option value="15">15%</option>
-                      <option value="12">12%</option>
-                      <option value="0">0%</option>
-                      <option value="fradrag">Fradragsberettiget</option>
-                    </select>
-                  </div>
+                  {ocrFailed && (
+                    <div className="mt-4 rounded-lg bg-amber-50 border border-amber-300 p-3">
+                      <p className="text-sm text-amber-800">
+                        OCR kunne ikke lese dokumentet automatisk. Fyll inn feltene manuelt på grunnlag av dokumentet.
+                      </p>
+                    </div>
+                  )}
 
-                  <div className="flex items-end">
-                    <label className="inline-flex items-center gap-2 text-sm text-stone-700">
-                      <input
-                        type="checkbox"
-                        checked={simpleMode}
-                        onChange={(event) => setSimpleMode(event.target.checked)}
-                      />
-                      Enkel modus
-                    </label>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold mb-1">Søk konto</label>
-                  <input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-                    placeholder="Søk på kontonummer eller navn"
-                  />
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-xs uppercase tracking-wider text-stone-600 font-semibold mb-1">Konto</label>
-                  <select
-                    value={accountCode}
-                    onChange={(event) => setAccountCode(event.target.value)}
-                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-                  >
-                    {accounts.map((account) => (
-                      <option key={account.code} value={account.code}>
-                        {account.code} - {account.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="mt-5">
-                  <button
-                    type="button"
-                    onClick={bookVoucher}
-                    disabled={booking || !uploadedVoucher}
-                    className="bg-bonde-earth text-white px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
-                  >
-                    {booking ? 'Fører...' : 'Før bilag'}
-                  </button>
-                </div>
-              </Card>
-
-              {(message || error) && (
-                <Card hoverEffect={false} className="p-4 bg-white">
-                  {message && <p className="text-emerald-700 text-sm">{message}</p>}
-                  {error && <p className="text-red-700 text-sm">{error}</p>}
+                  {!ocrFailed && voucher.ocr_warnings.length > 0 && (
+                    <div className="mt-4 rounded-lg bg-amber-50 border border-amber-300 p-3">
+                      <p className="text-sm text-amber-800">OCR er usikker på enkelte felt. Kontroller feltene merket med «Kontroller».</p>
+                    </div>
+                  )}
                 </Card>
-              )}
 
-              {uploadedVoucher && uploadedVoucher.ocr_text_preview && (
+                {/* Review form */}
                 <Card hoverEffect={false} className="p-6 bg-white">
-                  <div className="flex items-center justify-between gap-3 mb-3">
-                    <h3 className="text-base font-semibold text-stone-900">OCR-forslag</h3>
-                    <span className="text-xs text-stone-500">
-                      {uploadedVoucher.ocr_provider || 'ukjent motor'}
-                      {typeof uploadedVoucher.ocr_confidence === 'number' ? ` • ${(uploadedVoucher.ocr_confidence * 100).toFixed(0)}%` : ''}
-                    </span>
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <h2 className="text-lg font-semibold text-stone-900">3. Kontroller og korriger</h2>
                   </div>
-                  <p className="text-xs text-stone-600 mb-2">
-                    Forslagene er brukt til å forhåndsfylle feltene over. Kontroller før føring.
+                  <p className="text-xs text-stone-500 mb-4">
+                    Feltene er forhåndsutfylt med forslag fra OCR. Forslagene er veiledende – verdiene du lagrer er de som gjelder.
                   </p>
-                  <pre className="text-xs leading-relaxed whitespace-pre-wrap bg-stone-50 border border-stone-200 rounded-lg p-3 max-h-56 overflow-y-auto">
-                    {uploadedVoucher.ocr_text_preview}
-                  </pre>
+
+                  {reviewCount > 0 && (
+                    <div className="mb-4 rounded-lg bg-amber-50 border border-amber-300 p-3">
+                      <p className="text-sm text-amber-800">
+                        {reviewCount} felt {reviewCount === 1 ? 'trenger' : 'trenger'} kontroll før bokføring.
+                      </p>
+                    </div>
+                  )}
+
+                  <fieldset disabled={busy} className="space-y-5">
+                    {/* Supplier and invoice */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-stone-800 mb-3">Leverandør og faktura</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <FieldLabel label="Dokumenttype" needsReview={fieldNeedsReview('document_type')} />
+                          <select
+                            value={form.document_type}
+                            onChange={(event) => setField('document_type', event.target.value)}
+                            className={inputClass(fieldNeedsReview('document_type'))}
+                          >
+                            <option value="invoice">Faktura</option>
+                            <option value="receipt">Kvittering</option>
+                          </select>
+                        </div>
+                        <div>
+                          <FieldLabel label="Leverandør" needsReview={fieldNeedsReview('supplier_name')} />
+                          <input
+                            value={form.supplier_name}
+                            onChange={(event) => setField('supplier_name', event.target.value)}
+                            className={inputClass(fieldNeedsReview('supplier_name'))}
+                            placeholder="F.eks. Felleskjøpet"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="Organisasjonsnummer" needsReview={fieldNeedsReview('supplier_org_number')} />
+                          <input
+                            value={form.supplier_org_number}
+                            onChange={(event) => setField('supplier_org_number', event.target.value)}
+                            className={inputClass(fieldNeedsReview('supplier_org_number'))}
+                            placeholder="9 siffer"
+                            inputMode="numeric"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="Fakturanummer" needsReview={fieldNeedsReview('invoice_number')} />
+                          <input
+                            value={form.invoice_number}
+                            onChange={(event) => setField('invoice_number', event.target.value)}
+                            className={inputClass(fieldNeedsReview('invoice_number'))}
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="Fakturadato" needsReview={fieldNeedsReview('voucher_date')} />
+                          <input
+                            type="date"
+                            value={form.voucher_date}
+                            onChange={(event) => setField('voucher_date', event.target.value)}
+                            className={inputClass(fieldNeedsReview('voucher_date'))}
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="Forfallsdato" needsReview={fieldNeedsReview('due_date')} />
+                          <input
+                            type="date"
+                            value={form.due_date}
+                            onChange={(event) => setField('due_date', event.target.value)}
+                            className={inputClass(fieldNeedsReview('due_date'))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Amounts */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-stone-800 mb-3">Beløp</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <FieldLabel label="Totalbeløp" needsReview={fieldNeedsReview('amount')} />
+                          <input
+                            value={form.amount}
+                            onChange={(event) => setField('amount', event.target.value)}
+                            className={inputClass(fieldNeedsReview('amount'))}
+                            placeholder="0,00"
+                            inputMode="decimal"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="Valuta" needsReview={fieldNeedsReview('currency')} />
+                          <input
+                            value={form.currency}
+                            onChange={(event) => setField('currency', event.target.value)}
+                            className={inputClass(fieldNeedsReview('currency'))}
+                            placeholder="NOK"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="Beløp eks. MVA" needsReview={fieldNeedsReview('amount_excluding_vat')} />
+                          <input
+                            value={form.amount_excluding_vat}
+                            onChange={(event) => setField('amount_excluding_vat', event.target.value)}
+                            className={inputClass(fieldNeedsReview('amount_excluding_vat'))}
+                            placeholder="0,00"
+                            inputMode="decimal"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="MVA-beløp" needsReview={fieldNeedsReview('vat_amount')} />
+                          <input
+                            value={form.vat_amount}
+                            onChange={(event) => setField('vat_amount', event.target.value)}
+                            className={inputClass(fieldNeedsReview('vat_amount'))}
+                            placeholder="0,00"
+                            inputMode="decimal"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Payment */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-stone-800 mb-3">Betaling</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <FieldLabel label="KID" needsReview={fieldNeedsReview('kid')} />
+                          <input
+                            value={form.kid}
+                            onChange={(event) => setField('kid', event.target.value)}
+                            className={inputClass(fieldNeedsReview('kid'))}
+                            inputMode="numeric"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel label="Kontonummer" needsReview={fieldNeedsReview('bank_account')} />
+                          <input
+                            value={form.bank_account}
+                            onChange={(event) => setField('bank_account', event.target.value)}
+                            className={inputClass(fieldNeedsReview('bank_account'))}
+                            placeholder="XXXX.XX.XXXXX"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Booking */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-stone-800 mb-3">Bokføring</h3>
+                      <div className="space-y-4">
+                        <div>
+                          <FieldLabel label="Beskrivelse" needsReview={fieldNeedsReview('description')} />
+                          <input
+                            value={form.description}
+                            onChange={(event) => setField('description', event.target.value)}
+                            className={inputClass(fieldNeedsReview('description'))}
+                            placeholder="F.eks. Gjødsel kjøpt hos Felleskjøpet"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <FieldLabel label="Regnskapskonto" needsReview={fieldNeedsReview('account_code')} />
+                            <select
+                              value={form.account_code}
+                              onChange={(event) => setField('account_code', event.target.value)}
+                              className={inputClass(fieldNeedsReview('account_code'))}
+                            >
+                              <option value="">Velg konto</option>
+                              {accounts.map((account) => (
+                                <option key={account.code} value={account.code}>
+                                  {account.code} – {account.name}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={accountSearch}
+                              onChange={(event) => setAccountSearch(event.target.value)}
+                              className={`${inputBase} border-stone-300 bg-white mt-2`}
+                              placeholder="Søk på kontonummer eller navn"
+                            />
+                          </div>
+                          <div>
+                            <FieldLabel label="MVA-kode" needsReview={fieldNeedsReview('mva_code')} />
+                            <select
+                              value={form.mva_code}
+                              onChange={(event) => setField('mva_code', event.target.value)}
+                              className={inputClass(fieldNeedsReview('mva_code'))}
+                            >
+                              <option value="25">25 %</option>
+                              <option value="15">15 %</option>
+                              <option value="12">12 %</option>
+                              <option value="0">0 %</option>
+                              <option value="fradrag">Fradragsberettiget</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <FieldLabel label="Transaksjonstype" needsReview={false} />
+                          <select
+                            value={form.transaction_type}
+                            onChange={(event) => setField('transaction_type', event.target.value)}
+                            className={inputClass(false)}
+                          >
+                            <option value="expense">Utgift</option>
+                            <option value="income">Inntekt</option>
+                          </select>
+                        </div>
+
+                        <label className="inline-flex items-center gap-2 text-sm text-stone-700">
+                          <input
+                            type="checkbox"
+                            checked={simpleMode}
+                            onChange={(event) => setSimpleMode(event.target.checked)}
+                          />
+                          Enkel kontoliste
+                        </label>
+                      </div>
+                    </div>
+                  </fieldset>
+
+                  <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={busy}
+                      className="bg-white border border-stone-300 hover:border-bonde-green text-stone-800 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
+                    >
+                      {saving ? 'Lagrer...' : 'Lagre verdier'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleBook}
+                      disabled={busy}
+                      className="bg-bonde-earth text-white px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
+                    >
+                      {booking ? 'Bokfører...' : 'Bokfør bilag'}
+                    </button>
+                  </div>
                 </Card>
-              )}
-            </div>
+              </div>
+            )}
 
-            <div className="space-y-6">
-              <Card hoverEffect={false} className="p-6 bg-white">
-                <h3 className="text-base font-semibold text-stone-900 mb-3">Kontohjelp</h3>
-                <p className="text-sm text-stone-600 mb-4">Rask forklaring av vanlige kontoer for gårdsdrift.</p>
-                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                  {accounts.slice(0, 10).map((account) => (
-                    <div key={account.code} className="rounded-lg border border-stone-200 p-2.5">
-                      <p className="text-sm font-semibold text-stone-900">{account.code} - {account.name}</p>
-                      <p className="text-xs text-stone-600">{account.category}</p>
-                    </div>
-                  ))}
-                </div>
+            {(message || error) && (
+              <Card hoverEffect={false} className={`p-4 bg-white border-l-4 ${error ? 'border-red-500' : 'border-emerald-500'}`}>
+                {message && <p className="text-emerald-700 text-sm">{message}</p>}
+                {error && <p className="text-red-700 text-sm">{error}</p>}
               </Card>
-
-              <Card hoverEffect={false} className="p-6 bg-white">
-                <h3 className="text-base font-semibold text-stone-900 mb-3">Nøkkelbegreper</h3>
-                <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-                  {glossary.map((term) => (
-                    <div key={term.term}>
-                      <p className="text-sm font-semibold text-stone-900">{term.term}</p>
-                      <p className="text-xs text-stone-600">{term.description}</p>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
+            )}
           </div>
         )}
       </main>

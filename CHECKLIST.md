@@ -19,7 +19,10 @@
 - [x] Abonnement og entitlements per gård.
 - [ ] Usage per gård.
 - [x] Tenant-sikring av bilag, dokumentmetadata, bokføring, transaksjonslisting, rapporter og Blob-nedlasting.
-- [ ] Rate limiting, sikkerhetsgjennomgang og penetrasjonstest.
+- [x] Global rate limiting (in-memory per instans) og trusted proxy-håndtering.
+- [x] Bilagskontroll-flyt: opplasting, OCR-forslag, korrigering, lagring og bokføring.
+- [x] Pilotdokumentasjon: RELEASE_GATE.md, SMOKE_TESTS.md og STAGING_SETUP.md.
+- [ ] Sikkerhetsgjennomgang og penetrasjonstest.
 
 E-postlenker er Identity-MVP, ikke en abonnementskilde. Ikke legg identitet eller rettigheter i `localStorage`; onboarding lagrer bare en kortvarig UX-kladd lokalt frem til e-postlenken er brukt. `IDENTITY_HMAC_KEY` må være satt før Identity-rutene aktiveres.
 

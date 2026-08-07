@@ -2,7 +2,7 @@
 
 Barebonde er en modulær plattform for norske gårdsbruk og landbruksforetak. Løsningen utvikles rundt gårdsoversikt, regnskap og bilag, dokumenter, frister, ressurser og drift.
 
-**Status**: MVP-fase med identitet, medlemskap, abonnement og tenant-isolasjon implementert.
+**Status**: MVP-fase med identitet, medlemskap, abonnement, tenant-isolasjon og bilagskontroll (opplasting, OCR, korrigering og bokføring) implementert.
 
 ## Dagens løsning
 
@@ -95,6 +95,9 @@ docs/architecture/       Arkitekturbeslutninger
 - [Farm-medlemskap og tenant-isolasjon](./docs/FARM_MEMBERSHIP.md)
 - [Tenant-sikring av regnskap og dokumenter](./docs/TENANT_ACCOUNTING.md)
 - [Abonnement og entitlements](./docs/SUBSCRIPTIONS.md)
+- [Release gate](./docs/RELEASE_GATE.md)
+- [Smoke tests](./docs/SMOKE_TESTS.md)
+- [Staging-oppsett](./docs/STAGING_SETUP.md)
 - [Produktbacklog](./backlog/epics.md)
 - [Statusrapport](./STATUS_REPORT.md)
 - [Sjekkliste](./CHECKLIST.md)

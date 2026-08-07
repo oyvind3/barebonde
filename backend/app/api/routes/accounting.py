@@ -73,6 +73,13 @@ class DocumentResponse(BaseModel):
     # Do not expose raw OCR text, confidence or provider by default
 
 
+class FieldSuggestion(BaseModel):
+    value: Optional[Any] = None
+    confidence: Optional[float] = None
+    source: Optional[str] = None
+    warnings: list[str] = []
+
+
 class VoucherResponse(DocumentResponse):
     # User-confirmed fields (authoritative for booking)
     amount: float
@@ -95,6 +102,10 @@ class VoucherResponse(DocumentResponse):
     bank_account: Optional[str] = None
     # Document type
     document_type: str = "invoice"
+    # OCR field suggestions with confidence for "Kontroller" markers
+    field_suggestions: dict[str, Optional[FieldSuggestion]] = {}
+    ocr_warnings: list[str] = []
+    extraction_status: Optional[str] = None
     # Legacy OCR suggestions (kept for backward compatibility)
     ocr_suggested_amount: Optional[float] = None
     ocr_suggested_date: Optional[str] = None
@@ -205,6 +216,19 @@ def _document_response(item: dict[str, Any]) -> DocumentResponse:
 
 
 def _voucher_response(item: dict[str, Any]) -> VoucherResponse:
+    raw_suggestions = item.get("field_suggestions") or {}
+    field_suggestions: dict[str, Optional[FieldSuggestion]] = {}
+    for key, value in raw_suggestions.items():
+        if isinstance(value, dict):
+            field_suggestions[key] = FieldSuggestion(
+                value=value.get("value"),
+                confidence=value.get("confidence"),
+                source=value.get("source"),
+                warnings=value.get("warnings") or [],
+            )
+        else:
+            field_suggestions[key] = None
+
     return VoucherResponse(
         **_document_response(item).model_dump(),
         amount=float(item.get("amount") or 0),
@@ -227,6 +251,10 @@ def _voucher_response(item: dict[str, Any]) -> VoucherResponse:
         bank_account=item.get("bank_account"),
         # Document type
         document_type=item.get("document_type", "invoice"),
+        # OCR field suggestions
+        field_suggestions=field_suggestions,
+        ocr_warnings=item.get("ocr_warnings") or [],
+        extraction_status=item.get("extraction_status"),
         # Legacy OCR suggestions (kept for backward compatibility)
         ocr_suggested_amount=item.get("ocr_suggested_amount"),
         ocr_suggested_date=item.get("ocr_suggested_date"),

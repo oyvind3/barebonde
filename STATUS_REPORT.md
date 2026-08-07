@@ -1,6 +1,6 @@
 # Barebonde – statusrapport
 
-**Oppdatert:** 4. august 2026
+**Oppdatert:** 8. juli 2026
 **Status:** Eksisterende løsning er i aktiv utvikling; dette dokumentet beskriver verifiserbar repository-status, ikke en produksjonsgodkjenning.
 
 ## Aktiv arkitektur
@@ -18,6 +18,8 @@ BRREG-oppslag, gårdsoppsett, bilag/OCR og Plunk-integrasjon finnes i repository
 
 Rollene `owner`, `manager` og `staff` bruker en sentral, statisk permission-katalog. Opprettelse, lesing, endring og medlemsliste for Farm er tenant-isolert. Bilag, dokumentmetadata, dokumentnedlasting, bokføring, transaksjonslisting og rapporter bruker nå Farm-scope i URL, aktivt medlemskap og permission. Muterende bilagsruter krever CSRF. Nye Blob-navn er bundet til Farm og servergenerert dokument-ID; API-et streamer autoriserte nedlastinger og returnerer ikke varige Blob-URL-er. Hver Farm har ett statisk, versjonert abonnement med serverberegnede entitlements. Usage er fortsatt ikke implementert.
 
+Bilagskontroll-flyten er implementert i `frontend/app/bilag/new/page.tsx`: brukeren laster opp PDF eller bilde, ser behandlingsstatus og dokumentet side ved side med redigerbare OCR-forslag, markerer usikre/manglende felt med «Kontroller», korrigerer verdier, lagrer brukerbekreftede verdier og bokfører bilaget med tydelig success-state. OCR-forslag er forslag; brukerbekreftede verdier er autoritative. Rate limiting er in-memory per instans.
+
 Cosmos DB er den faktiske datalagringen. SQLAlchemy, PostgreSQL, Better Auth, ID-porten og Ory/Kratos er ikke aktive deler av dagens arkitektur.
 
 ## Subscription og entitlements
@@ -28,5 +30,7 @@ Hver Farm har ett idempotent `subscriptions`-dokument med en statisk, versjonert
 
 1. Kontrollert håndtering av legacy-dokumenter med `blob_url`.
 2. Rate limiting og sikkerhetsgjennomgang av Identity før bred produksjonsbruk.
+
+Se [Release gate](./docs/RELEASE_GATE.md), [Smoke tests](./docs/SMOKE_TESTS.md) og [Staging-oppsett](./docs/STAGING_SETUP.md) for pilotgrunnlag.
 
 Bootstrap-skriptet finnes, men er ikke kjørt mot et reelt Cosmos-miljø som del av repository-arbeidet.
