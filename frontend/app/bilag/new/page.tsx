@@ -187,6 +187,7 @@ export default function NewVoucherPage() {
   const [voucher, setVoucher] = useState<Voucher | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm())
   const [touched, setTouched] = useState<Set<string>>(new Set())
+  const [counterAccount, setCounterAccount] = useState('2400')
 
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -386,6 +387,7 @@ export default function NewVoucherPage() {
       const data = (await response.json()) as Voucher
       setVoucher(data)
       setForm(formFromVoucher(data))
+      setCounterAccount(data.document_type === 'receipt' ? '1920' : '2400')
       setTouched(new Set())
       setBooked(false)
       setMessage('Dokumentet er lastet opp. Kontroller forslagene før bokføring.')
@@ -531,6 +533,7 @@ export default function NewVoucherPage() {
             account_code: form.account_code,
             mva_code: form.mva_code,
             transaction_type: form.transaction_type,
+            counter_account_code: counterAccount,
             category: 'Drift',
             description: form.description,
           }),
@@ -995,6 +998,18 @@ export default function NewVoucherPage() {
                           >
                             <option value="expense">Utgift</option>
                             <option value="income">Inntekt</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <FieldLabel label="Hvordan ble kjøpet håndtert?" needsReview={false} />
+                          <select
+                            value={counterAccount}
+                            onChange={(event) => setCounterAccount(event.target.value)}
+                            className={inputClass(false)}
+                          >
+                            <option value="2400">Leverandørfaktura → Leverandørgjeld (2400)</option>
+                            <option value="1920">Betalt direkte → Bank (1920)</option>
                           </select>
                         </div>
 

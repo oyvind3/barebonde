@@ -33,6 +33,9 @@ export type VoucherData = {
   field_suggestions: Record<string, FieldSuggestion | null>
   ocr_warnings: string[]
   extraction_status: string | null
+  journal_entry_id?: string | null
+  journal_number?: string | null
+  accounting_revision?: number
 }
 
 export type VoucherFormState = {

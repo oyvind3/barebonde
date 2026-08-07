@@ -1,4 +1,9 @@
-"""Tenant-scoped voucher, document, transaction, and reporting routes."""
+"""Tenant-scoped voucher, document, journal, and reporting routes.
+
+Epic 4: the double-entry journal is the accounting source of truth. The legacy
+``accounting_transaction`` container is kept for compatibility but is no longer
+a write path for new bookings.
+"""
 
 from __future__ import annotations
 
@@ -20,9 +25,22 @@ from app.core.permissions import Permission
 from app.db.cosmos_client import (
     get_audit_logs_container,
     get_documents_container,
+    get_farms_container,
     get_transactions_container,
 )
-from app.services.accounting_catalog import GLOSSARY, search_accounts
+from app.services import accounting_posting_service, journal_service
+from app.services.accounting_catalog import (
+    GLOSSARY,
+    get_account,
+    is_cash_account,
+    search_accounts,
+)
+from app.services.journal_service import (
+    DuplicateSourceError,
+    JournalValidationError,
+    PeriodLockedError,
+    ore_to_kroner,
+)
 from app.services.ocr_service import OCRResult, ocr_service
 from app.services.storage_service import storage_service
 
@@ -110,6 +128,10 @@ class VoucherResponse(DocumentResponse):
     ocr_suggested_amount: Optional[float] = None
     ocr_suggested_date: Optional[str] = None
     ocr_suggested_supplier: Optional[str] = None
+    # Journal accounting references (Epic 4)
+    journal_entry_id: Optional[str] = None
+    journal_number: Optional[str] = None
+    accounting_revision: int = 1
 
 
 class TransactionResponse(BaseModel):
@@ -134,6 +156,21 @@ class BookVoucherRequest(BaseModel):
     transaction_type: str = "expense"
     category: Optional[str] = None
     description: Optional[str] = None
+    counter_account_code: Optional[str] = None
+    voucher_date: Optional[str] = None
+
+
+class CorrectBookingRequest(BaseModel):
+    account_code: str
+    counter_account_code: Optional[str] = None
+    mva_code: Optional[str] = None
+    transaction_type: str = "expense"
+    amount: float
+    amount_excluding_vat: Optional[float] = None
+    vat_amount: Optional[float] = None
+    description: Optional[str] = None
+    correction_date: Optional[str] = None
+    reason: str
 
 
 class ReviewVoucherRequest(BaseModel):
@@ -259,6 +296,10 @@ def _voucher_response(item: dict[str, Any]) -> VoucherResponse:
         ocr_suggested_amount=item.get("ocr_suggested_amount"),
         ocr_suggested_date=item.get("ocr_suggested_date"),
         ocr_suggested_supplier=item.get("ocr_suggested_supplier"),
+        # Journal references
+        journal_entry_id=item.get("journal_entry_id"),
+        journal_number=item.get("journal_number"),
+        accounting_revision=int(item.get("accounting_revision") or 1),
     )
 
 
@@ -314,7 +355,8 @@ def _list_voucher_items(farm_id: str) -> list[dict[str, Any]]:
         raise _service_unavailable("Dokumenttjenesten er utilgjengelig. Prøv igjen.", exc) from exc
 
 
-def _fetch_transactions(farm_id: str) -> list[dict[str, Any]]:
+def _fetch_legacy_transactions(farm_id: str) -> list[dict[str, Any]]:
+    """DEPRECATED: legacy transaction container, kept for compatibility only."""
     query = "SELECT * FROM c WHERE c.farm_id = @farm_id AND c.type = 'accounting_transaction'"
     try:
         return list(
@@ -326,6 +368,19 @@ def _fetch_transactions(farm_id: str) -> list[dict[str, Any]]:
         )
     except Exception as exc:
         raise _service_unavailable("Regnskapstjenesten er utilgjengelig. Prøv igjen.", exc) from exc
+
+
+def _farm_is_vat_registered(farm_id: str) -> bool:
+    try:
+        farm = get_farms_container().read_item(item=farm_id, partition_key=farm_id)
+    except Exception:
+        return True
+    vat = farm.get("vat_registered")
+    if vat is None:
+        return True
+    if isinstance(vat, bool):
+        return vat
+    return str(vat).strip().lower() not in {"false", "no", "nei", "0"}
 
 
 def _write_audit_event(event_type: str, farm_id: str, user_id: str) -> None:
@@ -383,6 +438,17 @@ def _month_key(date_value: str) -> str:
     except ValueError:
         dt = datetime.now(timezone.utc)
     return f"{dt.year}-{dt.month:02d}"
+
+
+def _journal_error_response(exc: Exception) -> HTTPException:
+    if isinstance(exc, PeriodLockedError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, DuplicateSourceError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, (JournalValidationError, accounting_posting_service.PostingError)):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    logger.error("Journal posting failed: %s", exc)
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Bokføringen feilet. Prøv igjen.")
 
 
 @router.get("/api/accounting/accounts")
@@ -565,7 +631,7 @@ async def review_voucher(
 
     For unbooked vouchers all fields can be updated. For booked vouchers only
     document metadata may change; accounting-critical fields (amount, date,
-    account, MVA code) are locked to stay consistent with the booked transaction.
+    account, MVA code) are locked -- corrections go through the correction flow.
     User-confirmed values are authoritative and will not be overwritten by OCR.
     """
     item = _read_voucher(farm_id=farm_id, voucher_id=voucher_id)
@@ -709,53 +775,51 @@ async def book_voucher(
         require_farm_permission(Permission.VOUCHER_BOOK, require_csrf_protection=True, require_active_farm=True)
     ),
 ) -> VoucherResponse:
-    """Book one voucher and atomically-as-practical create its transaction.
-    
-    Uses user-confirmed values from the voucher document. The request can override
-    specific fields, but typically the already-reviewed voucher values are used.
+    """Book one voucher as a balanced double-entry journal posting.
+
+    Uses user-confirmed values from the voucher document. The request can
+    override specific fields, but typically the already-reviewed voucher values
+    are used. No legacy accounting_transaction document is created.
     """
     if request.transaction_type not in {"income", "expense"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="transaction_type må være income eller expense")
     item = _read_voucher(farm_id=farm_id, voucher_id=voucher_id)
     if item.get("status") == "ført":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede ført.")
-    
+
     # Use user-confirmed values from voucher unless explicitly overridden in request
     amount = request.amount if request.amount is not None else item.get("amount", 0.0)
     account_code = request.account_code if request.account_code else item.get("account_code")
     mva_code = request.mva_code if request.mva_code is not None else item.get("mva_code")
     description = request.description if request.description is not None else item.get("description", "")
-    voucher_date = item.get("voucher_date") or datetime.now(timezone.utc).date().isoformat()
-    
+    voucher_date = request.voucher_date or item.get("voucher_date") or datetime.now(timezone.utc).date().isoformat()
+
     # Validate required fields for booking
     if not account_code:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Regnskapskonto er påkrevd for bokføring.")
     if not amount or amount <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Beløp må være større enn null.")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    transaction_item = {
-        "id": f"transaction:{voucher_id}",
-        "type": "accounting_transaction",
-        "farm_id": farm_id,
-        "voucher_id": voucher_id,
-        "transaction_type": request.transaction_type,
-        "category": request.category or "Drift",
-        "amount": amount,
-        "account_code": account_code,
-        "mva_code": mva_code,
-        "description": description,
-        "voucher_date": voucher_date,
-        "created_by_user_id": authorized.current.user["user_id"],
-        "created_at": now,
-    }
-    try:
-        get_transactions_container().create_item(transaction_item)
-    except exceptions.CosmosResourceExistsError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede ført.") from exc
-    except Exception as exc:
-        raise _service_unavailable("Kunne ikke føre bilaget. Prøv igjen.", exc) from exc
 
+    try:
+        entry = accounting_posting_service.post_voucher_booking(
+            farm_id=farm_id,
+            voucher=item,
+            transaction_type=request.transaction_type,
+            account_code=account_code,
+            counter_account_code=request.counter_account_code,
+            vat_code=mva_code,
+            amount=amount,
+            amount_excluding_vat=item.get("amount_excluding_vat"),
+            vat_amount=item.get("vat_amount"),
+            description=description,
+            posting_date=voucher_date,
+            user_id=authorized.current.user["user_id"],
+            vat_registered=_farm_is_vat_registered(farm_id),
+        )
+    except Exception as exc:
+        raise _journal_error_response(exc) from exc
+
+    now = datetime.now(timezone.utc).isoformat()
     item.update(
         {
             "amount": amount,
@@ -763,23 +827,100 @@ async def book_voucher(
             "mva_code": mva_code,
             "status": "ført",
             "description": description,
+            "voucher_date": voucher_date,
+            "journal_entry_id": entry.get("id"),
+            "journal_number": entry.get("journal_number"),
+            "accounting_revision": 1,
             "updated_at": now,
         }
     )
     try:
         get_documents_container().upsert_item(item)
     except Exception as exc:
-        logger.error("Voucher booking metadata update failed after transaction creation: %s", exc)
-        try:
-            get_transactions_container().delete_item(item=transaction_item["id"], partition_key=farm_id)
-        except Exception as cleanup_exc:
-            logger.warning("Transaction cleanup failed after voucher booking failure: %s", cleanup_exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Kunne ikke føre bilaget. Prøv igjen.",
-        ) from exc
+        # The journal entry is authoritative; do not delete it. Retry/reconcile
+        # can complete the voucher metadata later.
+        logger.error(
+            "Voucher metadata update failed after journal posting %s: %s",
+            entry.get("journal_number"),
+            exc,
+        )
 
-    _write_audit_event("VoucherBooked", farm_id, authorized.current.user["user_id"])
+    _write_audit_event("JournalEntryPosted", farm_id, authorized.current.user["user_id"])
+    return _voucher_response(item)
+
+
+@router.post("/api/farms/{farm_id}/vouchers/{voucher_id}/correct-booking", response_model=VoucherResponse)
+async def correct_voucher_booking(
+    farm_id: str,
+    voucher_id: str,
+    request: CorrectBookingRequest,
+    authorized: AuthorizedFarm = Depends(
+        require_farm_permission(Permission.JOURNAL_CORRECT, require_csrf_protection=True, require_active_farm=True)
+    ),
+) -> VoucherResponse:
+    """Correct a booked voucher by posting a new balanced correction entry.
+
+    The original journal entry is never mutated. The correction reverses the
+    current effective accounting state and posts the corrected effect in one
+    balanced entry with its own journal number.
+    """
+    if request.transaction_type not in {"income", "expense"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="transaction_type må være income eller expense")
+    if not (request.reason or "").strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Begrunnelse for korrigeringen er påkrevd.")
+
+    item = _read_voucher(farm_id=farm_id, voucher_id=voucher_id)
+    if item.get("status") != "ført":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er ikke bokført og kan ikke korrigeres.")
+
+    try:
+        entry = accounting_posting_service.post_voucher_correction(
+            farm_id=farm_id,
+            voucher=item,
+            transaction_type=request.transaction_type,
+            account_code=request.account_code,
+            counter_account_code=request.counter_account_code,
+            vat_code=request.mva_code,
+            amount=request.amount,
+            amount_excluding_vat=request.amount_excluding_vat,
+            vat_amount=request.vat_amount,
+            description=request.description or item.get("description") or "",
+            correction_date=request.correction_date,
+            reason=request.reason.strip(),
+            user_id=authorized.current.user["user_id"],
+            vat_registered=_farm_is_vat_registered(farm_id),
+        )
+    except Exception as exc:
+        raise _journal_error_response(exc) from exc
+
+    now = datetime.now(timezone.utc).isoformat()
+    item.update(
+        {
+            "amount": request.amount,
+            "account_code": request.account_code,
+            "mva_code": request.mva_code,
+            "description": request.description if request.description is not None else item.get("description"),
+            "journal_entry_id": entry.get("id"),
+            "journal_number": entry.get("journal_number"),
+            "accounting_revision": int(entry.get("source_revision") or 2),
+            "updated_at": now,
+        }
+    )
+    if request.amount_excluding_vat is not None:
+        item["amount_excluding_vat"] = request.amount_excluding_vat
+    if request.vat_amount is not None:
+        item["vat_amount"] = request.vat_amount
+    try:
+        get_documents_container().upsert_item(item)
+    except Exception as exc:
+        # Journal is authoritative; metadata can be reconciled on retry.
+        logger.error(
+            "Voucher metadata update failed after correction %s: %s",
+            entry.get("journal_number"),
+            exc,
+        )
+
+    _write_audit_event("VoucherAccountingCorrected", farm_id, authorized.current.user["user_id"])
     return _voucher_response(item)
 
 
@@ -788,22 +929,220 @@ async def list_transactions(
     farm_id: str,
     _: AuthorizedFarm = Depends(require_farm_permission(Permission.TRANSACTION_READ)),
 ) -> list[TransactionResponse]:
-    return [_transaction_response(item) for item in _fetch_transactions(farm_id)]
+    """DEPRECATED compatibility projection.
 
+    New bookings never write accounting_transaction documents. This endpoint
+    keeps returning legacy transactions for existing clients; journal entries
+    are the source of truth and win over duplicates.
+    """
+    journal_source_keys = {
+        entry.get("source_key")
+        for entry in journal_service.list_entries(farm_id, source_type="voucher", limit=5000)
+    }
+    rows: list[TransactionResponse] = []
+    for item in _fetch_legacy_transactions(farm_id):
+        # Skip legacy rows that already have a journal posting for the same voucher.
+        if f"voucher:{item.get('voucher_id')}:booking" in journal_source_keys:
+            continue
+        rows.append(_transaction_response(item))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Journal API
+# ---------------------------------------------------------------------------
+
+@router.get("/api/farms/{farm_id}/journal")
+async def list_journal_entries(
+    farm_id: str,
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    account_code: Optional[str] = Query(default=None),
+    source_type: Optional[str] = Query(default=None),
+    source_id: Optional[str] = Query(default=None),
+    journal_number: Optional[str] = Query(default=None),
+    limit: int = Query(default=200, le=1000),
+    _: AuthorizedFarm = Depends(require_farm_permission(Permission.JOURNAL_READ)),
+) -> dict[str, Any]:
+    entries = journal_service.list_entries(
+        farm_id,
+        date_from=date_from,
+        date_to=date_to,
+        account_code=account_code,
+        source_type=source_type,
+        source_id=source_id,
+        journal_number=journal_number,
+        limit=limit,
+    )
+    return {"entries": entries}
+
+
+@router.get("/api/farms/{farm_id}/journal/{entry_id}")
+async def get_journal_entry(
+    farm_id: str,
+    entry_id: str,
+    _: AuthorizedFarm = Depends(require_farm_permission(Permission.JOURNAL_READ)),
+) -> dict[str, Any]:
+    entry = journal_service.read_entry(farm_id, entry_id)
+    if not entry:
+        raise _resource_not_found()
+    return entry
+
+
+# ---------------------------------------------------------------------------
+# Accounting periods
+# ---------------------------------------------------------------------------
+
+def _read_period(farm_id: str, period: str) -> Optional[dict[str, Any]]:
+    from app.db.cosmos_client import get_accounting_periods_container
+
+    try:
+        return get_accounting_periods_container().read_item(
+            item=f"accounting-period:{farm_id}:{period}",
+            partition_key=farm_id,
+        )
+    except exceptions.CosmosResourceNotFoundError:
+        return None
+
+
+@router.get("/api/farms/{farm_id}/accounting/periods")
+async def list_accounting_periods(
+    farm_id: str,
+    _: AuthorizedFarm = Depends(require_farm_permission(Permission.ACCOUNTING_PERIOD_READ)),
+) -> dict[str, Any]:
+    """List periods derived from journal activity plus explicit period documents."""
+    entries = journal_service.list_entries(farm_id, limit=5000)
+    seen: set[str] = set()
+    for entry in entries:
+        period = str(entry.get("posting_date") or "")[:7]
+        if period:
+            seen.add(period)
+
+    from app.db.cosmos_client import get_accounting_periods_container
+
+    try:
+        period_docs = list(
+            get_accounting_periods_container().query_items(
+                query="SELECT * FROM c WHERE c.type = 'accounting_period' AND c.farm_id = @farm_id",
+                parameters=[{"name": "@farm_id", "value": farm_id}],
+                partition_key=farm_id,
+            )
+        )
+    except Exception:
+        period_docs = []
+    for doc in period_docs:
+        if doc.get("period"):
+            seen.add(doc["period"])
+
+    rows = []
+    for period in sorted(seen, reverse=True):
+        doc = _read_period(farm_id, period)
+        rows.append(
+            {
+                "period": period,
+                "status": doc.get("status") if doc else "open",
+                "locked_at": doc.get("locked_at") if doc else None,
+                "locked_by_user_id": doc.get("locked_by_user_id") if doc else None,
+            }
+        )
+    return {"periods": rows}
+
+
+@router.post("/api/farms/{farm_id}/accounting/periods/{period}/lock")
+async def lock_accounting_period(
+    farm_id: str,
+    period: str,
+    authorized: AuthorizedFarm = Depends(
+        require_farm_permission(Permission.ACCOUNTING_PERIOD_LOCK, require_csrf_protection=True, require_active_farm=True)
+    ),
+) -> dict[str, Any]:
+    from app.db.cosmos_client import get_accounting_periods_container
+
+    try:
+        date.fromisoformat(f"{period}-01")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ugyldig periodeformat. Bruk YYYY-MM.") from exc
+
+    doc = {
+        "id": f"accounting-period:{farm_id}:{period}",
+        "type": "accounting_period",
+        "farm_id": farm_id,
+        "period": period,
+        "status": "locked",
+        "locked_at": datetime.now(timezone.utc).isoformat(),
+        "locked_by_user_id": authorized.current.user["user_id"],
+    }
+    try:
+        get_accounting_periods_container().upsert_item(doc)
+    except Exception as exc:
+        raise _service_unavailable("Kunne ikke låse perioden. Prøv igjen.", exc) from exc
+
+    _write_audit_event("AccountingPeriodLocked", farm_id, authorized.current.user["user_id"])
+    return doc
+
+
+@router.post("/api/farms/{farm_id}/accounting/periods/{period}/unlock")
+async def unlock_accounting_period(
+    farm_id: str,
+    period: str,
+    authorized: AuthorizedFarm = Depends(
+        require_farm_permission(Permission.ACCOUNTING_PERIOD_UNLOCK, require_csrf_protection=True, require_active_farm=True)
+    ),
+) -> dict[str, Any]:
+    from app.db.cosmos_client import get_accounting_periods_container
+
+    doc = _read_period(farm_id, period)
+    if not doc:
+        raise _resource_not_found()
+    doc["status"] = "open"
+    doc["unlocked_at"] = datetime.now(timezone.utc).isoformat()
+    doc["unlocked_by_user_id"] = authorized.current.user["user_id"]
+    try:
+        get_accounting_periods_container().upsert_item(doc)
+    except Exception as exc:
+        raise _service_unavailable("Kunne ikke låse opp perioden. Prøv igjen.", exc) from exc
+
+    _write_audit_event("AccountingPeriodUnlocked", farm_id, authorized.current.user["user_id"])
+    return doc
+
+
+# ---------------------------------------------------------------------------
+# Reports (journal-based)
+# ---------------------------------------------------------------------------
 
 @router.get("/api/farms/{farm_id}/reports/monthly")
 async def report_monthly(
     farm_id: str,
     _: AuthorizedFarm = Depends(require_farm_permission(Permission.REPORT_BASIC_READ)),
 ) -> dict[str, Any]:
-    monthly: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
-    for tx in _fetch_transactions(farm_id):
-        key = _month_key(str(tx.get("voucher_date") or ""))
-        amount = float(tx.get("amount") or 0)
-        monthly[key]["income" if tx.get("transaction_type") == "income" else "expense"] += amount
+    """Monthly result from journal lines using account metadata.
+
+    Income = credits - debits on income accounts; expense = debits - credits on
+    expense accounts. Corrections affect the result automatically.
+    """
+    monthly: dict[str, dict[str, int]] = defaultdict(lambda: {"income": 0, "expense": 0})
+    for entry in journal_service.list_entries(farm_id, limit=5000):
+        month = str(entry.get("posting_date") or "")[:7]
+        if not month:
+            continue
+        for line in entry.get("lines", []):
+            account = get_account(line.get("account_code"))
+            if not account:
+                continue
+            debit = int(line.get("debit_ore") or 0)
+            credit = int(line.get("credit_ore") or 0)
+            if account.get("account_type") == "income":
+                monthly[month]["income"] += credit - debit
+            elif account.get("account_type") == "expense":
+                monthly[month]["expense"] += debit - credit
     return {
         "rows": [
-            {"month": key, "income": values["income"], "expense": values["expense"], "net": values["income"] - values["expense"]}
+            {
+                "month": key,
+                "income": round(ore_to_kroner(values["income"]), 2),
+                "expense": round(ore_to_kroner(values["expense"]), 2),
+                "net": round(ore_to_kroner(values["income"] - values["expense"]), 2),
+            }
             for key, values in sorted(monthly.items())
         ]
     }
@@ -814,20 +1153,23 @@ async def report_vat(
     farm_id: str,
     _: AuthorizedFarm = Depends(require_farm_permission(Permission.REPORT_BASIC_READ)),
 ) -> dict[str, Any]:
-    incoming_vat = 0.0
-    outgoing_vat = 0.0
-    for tx in _fetch_transactions(farm_id):
-        amount = float(tx.get("amount") or 0)
-        mva_code = str(tx.get("mva_code") or "").lower()
-        rate = 0.15 if "15" in mva_code else 0.12 if "12" in mva_code else 0.0 if "0" in mva_code else 0.25
-        if tx.get("transaction_type") == "income":
-            outgoing_vat += amount * rate
-        elif "fradrag" in mva_code or mva_code in {"25", "15", "12"}:
-            incoming_vat += amount * rate
+    """VAT report from actual VAT journal lines (2710 input / 2700 output)."""
+    incoming_ore = 0
+    outgoing_ore = 0
+    for entry in journal_service.list_entries(farm_id, limit=5000):
+        for line in entry.get("lines", []):
+            account_code = line.get("account_code")
+            vat_amount = int(line.get("vat_amount_ore") or 0)
+            if vat_amount <= 0:
+                continue
+            if account_code == "2710":
+                incoming_ore += vat_amount
+            elif account_code == "2700":
+                outgoing_ore += vat_amount
     return {
-        "incoming_vat": round(incoming_vat, 2),
-        "outgoing_vat": round(outgoing_vat, 2),
-        "estimated_settlement": round(outgoing_vat - incoming_vat, 2),
+        "incoming_vat": round(ore_to_kroner(incoming_ore), 2),
+        "outgoing_vat": round(ore_to_kroner(outgoing_ore), 2),
+        "estimated_settlement": round(ore_to_kroner(outgoing_ore - incoming_ore), 2),
     }
 
 
@@ -836,12 +1178,24 @@ async def report_grants(
     farm_id: str,
     _: AuthorizedFarm = Depends(require_farm_permission(Permission.REPORT_BASIC_READ)),
 ) -> dict[str, Any]:
+    """Grants identified primarily from account 3100 in journal lines."""
     rows = []
-    for tx in _fetch_transactions(farm_id):
-        description = str(tx.get("description") or "")
-        if tx.get("account_code") == "3100" or "tilskudd" in description.casefold():
-            voucher_date = str(tx.get("voucher_date") or datetime.now(timezone.utc).date().isoformat())
-            rows.append({"voucher_date": voucher_date, "amount": float(tx.get("amount") or 0), "description": description or "Tilskudd", "period": _month_key(voucher_date)})
+    for entry in journal_service.list_entries(farm_id, limit=5000):
+        posting_date = str(entry.get("posting_date") or "")
+        for line in entry.get("lines", []):
+            if line.get("account_code") != "3100":
+                continue
+            amount_ore = int(line.get("credit_ore") or 0) - int(line.get("debit_ore") or 0)
+            if amount_ore <= 0:
+                continue
+            rows.append(
+                {
+                    "voucher_date": posting_date,
+                    "amount": round(ore_to_kroner(amount_ore), 2),
+                    "description": line.get("description") or entry.get("description") or "Tilskudd",
+                    "period": posting_date[:7],
+                }
+            )
     return {"rows": sorted(rows, key=lambda item: item["voucher_date"], reverse=True)}
 
 
@@ -850,20 +1204,23 @@ async def report_journal(
     farm_id: str,
     _: AuthorizedFarm = Depends(require_farm_permission(Permission.REPORT_BASIC_READ)),
 ) -> dict[str, Any]:
-    return {
-        "rows": [
+    """The actual double-entry journal, not voucher metadata."""
+    rows = []
+    for entry in journal_service.list_entries(farm_id, limit=5000):
+        rows.append(
             {
-                "voucher_id": item["id"],
-                "date": item.get("voucher_date"),
-                "file_name": item.get("file_name"),
-                "status": item.get("status") or "mottatt",
-                "account_code": item.get("account_code"),
-                "mva_code": item.get("mva_code"),
-                "amount": float(item.get("amount") or 0),
+                "journal_entry_id": entry.get("id"),
+                "journal_number": entry.get("journal_number"),
+                "posting_date": entry.get("posting_date"),
+                "source_type": entry.get("source_type"),
+                "source_id": entry.get("source_id"),
+                "description": entry.get("description"),
+                "total_debit": round(ore_to_kroner(int(entry.get("total_debit_ore") or 0)), 2),
+                "total_credit": round(ore_to_kroner(int(entry.get("total_credit_ore") or 0)), 2),
+                "is_correction": bool(entry.get("correction_of")),
             }
-            for item in _list_voucher_items(farm_id)
-        ]
-    }
+        )
+    return {"rows": rows}
 
 
 @router.get("/api/farms/{farm_id}/reports/liquidity")
@@ -878,16 +1235,77 @@ async def report_liquidity(
         )
     ),
 ) -> dict[str, Any]:
-    balance = opening_balance
+    """Liquidity from cash/bank account movements only.
+
+    Issued-but-unpaid invoices do not affect liquidity; payments do.
+    """
+    balance_ore = int(round(opening_balance * 100))
+    movements: list[tuple[str, str, int]] = []
+    for entry in journal_service.list_entries(farm_id, limit=5000):
+        posting_date = str(entry.get("posting_date") or "")
+        for line in entry.get("lines", []):
+            if not is_cash_account(line.get("account_code")):
+                continue
+            delta = int(line.get("debit_ore") or 0) - int(line.get("credit_ore") or 0)
+            if delta == 0:
+                continue
+            movements.append((posting_date, line.get("description") or entry.get("description") or "Bilag", delta))
+
     points = []
-    for tx in sorted(_fetch_transactions(farm_id), key=lambda item: str(item.get("voucher_date") or "")):
-        amount = float(tx.get("amount") or 0)
-        balance += amount if tx.get("transaction_type") == "income" else -amount
+    for posting_date, description, delta in sorted(movements, key=lambda item: item[0]):
+        balance_ore += delta
         points.append(
             {
-                "date": tx.get("voucher_date"),
-                "description": tx.get("description") or tx.get("category") or "Bilag",
-                "balance": round(balance, 2),
+                "date": posting_date,
+                "description": description,
+                "balance": round(ore_to_kroner(balance_ore), 2),
             }
         )
-    return {"opening_balance": opening_balance, "closing_balance": round(balance, 2), "points": points}
+    return {
+        "opening_balance": opening_balance,
+        "closing_balance": round(ore_to_kroner(balance_ore), 2),
+        "points": points,
+    }
+
+
+@router.get("/api/farms/{farm_id}/reports/trial-balance")
+async def report_trial_balance(
+    farm_id: str,
+    _: AuthorizedFarm = Depends(require_farm_permission(Permission.REPORT_BASIC_READ)),
+) -> dict[str, Any]:
+    """Per-account debit/credit/balance from the journal. Total must balance."""
+    accounts: dict[str, dict[str, int]] = defaultdict(lambda: {"debit": 0, "credit": 0})
+    for entry in journal_service.list_entries(farm_id, limit=5000):
+        for line in entry.get("lines", []):
+            code = str(line.get("account_code") or "")
+            if not code:
+                continue
+            accounts[code]["debit"] += int(line.get("debit_ore") or 0)
+            accounts[code]["credit"] += int(line.get("credit_ore") or 0)
+
+    rows = []
+    total_debit = 0
+    total_credit = 0
+    for code in sorted(accounts.keys()):
+        values = accounts[code]
+        account = get_account(code) or {}
+        debit = values["debit"]
+        credit = values["credit"]
+        total_debit += debit
+        total_credit += credit
+        rows.append(
+            {
+                "account_code": code,
+                "account_name": account.get("name") or "",
+                "account_type": account.get("account_type") or "",
+                "debit": round(ore_to_kroner(debit), 2),
+                "credit": round(ore_to_kroner(credit), 2),
+                "balance": round(ore_to_kroner(debit - credit), 2),
+            }
+        )
+    return {
+        "rows": rows,
+        "total_debit": round(ore_to_kroner(total_debit), 2),
+        "total_credit": round(ore_to_kroner(total_credit), 2),
+        "balanced": total_debit == total_credit,
+    }

@@ -113,3 +113,13 @@ def get_customers_container() -> Any:
 def get_sales_invoices_container() -> Any:
     """Return the Farm-partitioned sales invoice container proxy."""
     return get_container_client("sales_invoices")
+
+
+def get_journal_entries_container() -> Any:
+    """Return the Farm-partitioned double-entry journal container proxy."""
+    return get_container_client("journal_entries")
+
+
+def get_accounting_periods_container() -> Any:
+    """Return the Farm-partitioned accounting period container proxy."""
+    return get_container_client("accounting_periods")

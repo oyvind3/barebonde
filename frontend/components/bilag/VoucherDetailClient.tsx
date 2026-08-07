@@ -61,6 +61,61 @@ export default function VoucherDetailClient({ voucherId }: VoucherDetailClientPr
 
   const isBooked = voucher?.status === 'ført'
 
+  const [correctionOpen, setCorrectionOpen] = useState(false)
+  const [correctionSaving, setCorrectionSaving] = useState(false)
+  const [correctionError, setCorrectionError] = useState('')
+  const [correction, setCorrection] = useState({
+    account_code: '',
+    mva_code: '25',
+    amount: '',
+    correction_date: new Date().toISOString().slice(0, 10),
+    reason: '',
+  })
+
+  const submitCorrection = async () => {
+    if (!voucher || !farmId || correctionSaving) return
+    setCorrectionError('')
+    const parsedAmount = parseAmount(correction.amount)
+    if (!correction.account_code || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setCorrectionError('Konto og gyldig beløp er påkrevd.')
+      return
+    }
+    if (!correction.reason.trim()) {
+      setCorrectionError('Begrunnelse er påkrevd.')
+      return
+    }
+    setCorrectionSaving(true)
+    try {
+      const response = await apiFetch(
+        `/api/farms/${encodeURIComponent(farmId)}/vouchers/${encodeURIComponent(voucherId)}/correct-booking`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            account_code: correction.account_code,
+            mva_code: correction.mva_code,
+            transaction_type: 'expense',
+            amount: parsedAmount,
+            correction_date: correction.correction_date,
+            reason: correction.reason.trim(),
+          }),
+        }
+      )
+      if (!response.ok) {
+        throw new Error(await apiErrorMessage(response, 'Kunne ikke korrigere bokføringen.'))
+      }
+      const updated = (await response.json()) as VoucherData
+      setVoucher(updated)
+      setForm(formFromVoucher(updated))
+      setCorrectionOpen(false)
+      setMessage('Bokføringen er korrigert med en ny journalpost.')
+    } catch (err) {
+      setCorrectionError(err instanceof Error ? err.message : 'Ukjent feil ved korrigering.')
+    } finally {
+      setCorrectionSaving(false)
+    }
+  }
+
   // --- Identity / Farm scope ---
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
@@ -77,7 +132,7 @@ export default function VoucherDetailClient({ voucherId }: VoucherDetailClientPr
 
   // --- Account catalog (for edit mode) ---
   useEffect(() => {
-    if (!editing) return
+    if (!editing && !correctionOpen) return
     let cancelled = false
     const run = async () => {
       try {
@@ -94,7 +149,7 @@ export default function VoucherDetailClient({ voucherId }: VoucherDetailClientPr
     return () => {
       cancelled = true
     }
-  }, [editing, simpleMode])
+  }, [editing, correctionOpen, simpleMode])
 
   // --- Fetch voucher ---
   useEffect(() => {
@@ -405,10 +460,93 @@ export default function VoucherDetailClient({ voucherId }: VoucherDetailClientPr
               </div>
 
               {isBooked && (
-                <div className="mb-4 rounded-lg bg-blue-50 border border-blue-200 p-3">
+                <div className="mb-4 rounded-lg bg-blue-50 border border-blue-200 p-3 space-y-2">
                   <p className="text-sm text-blue-800">
-                    Bilaget er bokført. Dokumentinformasjon kan endres, men beløp, konto og MVA krever en egen korrigeringsflyt.
+                    Bokført{voucher.journal_number ? ` – journalnr ${voucher.journal_number}` : ''}
+                    {typeof voucher.accounting_revision === 'number' && voucher.accounting_revision > 1
+                      ? ` (revisjon ${voucher.accounting_revision})`
+                      : ''}
                   </p>
+                  <p className="text-sm text-blue-800">
+                    Dokumentinformasjon kan endres, men beløp, konto og MVA korrigeres med en egen korrigeringspost.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setCorrectionOpen((open) => !open)}
+                    className="text-sm font-semibold text-blue-800 underline"
+                  >
+                    {correctionOpen ? 'Lukk korrigering' : 'Korriger bokføring'}
+                  </button>
+                </div>
+              )}
+
+              {isBooked && correctionOpen && (
+                <div className="mb-4 rounded-lg border border-stone-200 p-4 space-y-4">
+                  <h3 className="text-sm font-semibold text-stone-800">Korriger bokføring</h3>
+                  <p className="text-xs text-stone-500">
+                    Korrigeringen endrer ikke den opprinnelige journalposten. Barebonde lager en ny
+                    korrigeringspost slik at historikken beholdes.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <FieldLabel label="Konto" needsReview={false} />
+                      <select
+                        className={inputClass(false)}
+                        value={correction.account_code}
+                        onChange={(e) => setCorrection((c) => ({ ...c, account_code: e.target.value }))}
+                      >
+                        <option value="">Velg konto</option>
+                        {accounts.map((account) => (
+                          <option key={account.code} value={account.code}>
+                            {account.code} – {account.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <FieldLabel label="MVA-kode" needsReview={false} />
+                      <select
+                        className={inputClass(false)}
+                        value={correction.mva_code}
+                        onChange={(e) => setCorrection((c) => ({ ...c, mva_code: e.target.value }))}
+                      >
+                        {Object.entries(MVA_CODE_LABELS).map(([code, label]) => (
+                          <option key={code} value={code}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <FieldLabel label="Totalbeløp" needsReview={false} />
+                      <input
+                        className={inputClass(false)}
+                        value={correction.amount}
+                        onChange={(e) => setCorrection((c) => ({ ...c, amount: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel label="Korrigeringsdato" needsReview={false} />
+                      <input
+                        type="date"
+                        className={inputClass(false)}
+                        value={correction.correction_date}
+                        onChange={(e) => setCorrection((c) => ({ ...c, correction_date: e.target.value }))}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <FieldLabel label="Begrunnelse (påkrevd)" needsReview={false} />
+                      <input
+                        className={inputClass(false)}
+                        value={correction.reason}
+                        onChange={(e) => setCorrection((c) => ({ ...c, reason: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  {correctionError && <p className="text-sm text-red-600">{correctionError}</p>}
+                  <Button variant="secondary" onClick={submitCorrection} disabled={correctionSaving}>
+                    {correctionSaving ? 'Korrigerer…' : 'Send korrigering'}
+                  </Button>
                 </div>
               )}
 

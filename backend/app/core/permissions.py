@@ -50,6 +50,11 @@ class Permission(str, Enum):
     SALES_INVOICE_ISSUE = "sales_invoice.issue"
     SALES_INVOICE_SEND = "sales_invoice.send"
     SALES_INVOICE_MARK_PAID = "sales_invoice.mark_paid"
+    JOURNAL_READ = "journal.read"
+    JOURNAL_CORRECT = "journal.correct"
+    ACCOUNTING_PERIOD_READ = "accounting_period.read"
+    ACCOUNTING_PERIOD_LOCK = "accounting_period.lock"
+    ACCOUNTING_PERIOD_UNLOCK = "accounting_period.unlock"
 
 
 ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
@@ -83,6 +88,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.SALES_INVOICE_ISSUE,
             Permission.SALES_INVOICE_SEND,
             Permission.SALES_INVOICE_MARK_PAID,
+            Permission.JOURNAL_READ,
+            Permission.JOURNAL_CORRECT,
+            Permission.ACCOUNTING_PERIOD_READ,
+            Permission.ACCOUNTING_PERIOD_LOCK,
         }
     ),
     "staff": frozenset(
@@ -96,6 +105,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.REPORT_BASIC_READ,
             Permission.CUSTOMER_READ,
             Permission.SALES_INVOICE_READ,
+            Permission.JOURNAL_READ,
+            Permission.ACCOUNTING_PERIOD_READ,
         }
     ),
 }

@@ -26,6 +26,8 @@ from app.db.cosmos_client import (
     get_sales_invoices_container,
 )
 from app.middleware.rate_limiter import rate_limit_dependency
+from app.services import accounting_posting_service
+from app.services.accounting_catalog import is_income_account
 from app.services.email_service import EmailDeliveryError, send_transactional_email, validate_plunk_configured
 from app.services.sales_invoice_calculation import (
     SUPPORTED_VAT_RATES,
@@ -69,6 +71,7 @@ class InvoiceLineInput(BaseModel):
     unit: str = Field(default="stk", max_length=20)
     unit_price_ex_vat_ore: int = Field(ge=0)
     vat_rate: int
+    account_code: Optional[str] = None
 
 
 class InvoiceCreate(BaseModel):
@@ -163,6 +166,12 @@ def _normalize_lines(raw_lines: list[InvoiceLineInput]) -> list[dict]:
                 detail=f"Linje {index}: MVA-satsen er ikke støttet.",
             )
         unit = line.unit.strip().lower() or "stk"
+        account_code = (line.account_code or "").strip() or None
+        if account_code and not is_income_account(account_code):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Linje {index}: konto {account_code} er ikke en inntektskonto.",
+            )
         lines.append(
             {
                 "id": f"line:{uuid4()}",
@@ -171,6 +180,7 @@ def _normalize_lines(raw_lines: list[InvoiceLineInput]) -> list[dict]:
                 "unit": unit if unit in UNIT_CHOICES else line.unit.strip()[:20],
                 "unit_price_ex_vat_ore": int(line.unit_price_ex_vat_ore),
                 "vat_rate": int(line.vat_rate),
+                "account_code": account_code,
             }
         )
     return lines
@@ -212,6 +222,12 @@ def _invoice_response(document: dict) -> dict:
         "delivery": document.get("delivery")
         or {"recipient_email": None, "send_count": 0, "last_attempt_at": None, "last_success_at": None, "provider_message_id": None, "last_error": None},
         "version": document.get("version") or 1,
+        "accounting_status": document.get("accounting_status") or "unposted",
+        "issue_journal_entry_id": document.get("issue_journal_entry_id"),
+        "issue_journal_number": document.get("issue_journal_number"),
+        "payment_journal_entry_id": document.get("payment_journal_entry_id"),
+        "payment_journal_number": document.get("payment_journal_number"),
+        "accounting_last_error": document.get("accounting_last_error"),
         "created_at": document.get("created_at"),
         "updated_at": document.get("updated_at"),
     }
@@ -295,6 +311,40 @@ def _build_customer_snapshot(customer: dict) -> dict:
         "city": customer.get("city") or "",
         "country_code": customer.get("country_code") or "NO",
     }
+
+
+def _post_issue_accounting(farm_id: str, document: dict, user_id: str, container) -> dict:
+    """Idempotently post the issue journal entry for an issued invoice.
+
+    On failure the invoice stays issued with accounting_status=error so the
+    user can retry; the invoice is never rolled back.
+    """
+    try:
+        entry = accounting_posting_service.post_sales_invoice_issue(
+            farm_id=farm_id,
+            invoice=document,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        document["accounting_status"] = "error"
+        document["accounting_last_error"] = str(exc)[:500]
+        document["updated_at"] = now()
+        container.upsert_item(document)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Fakturaen er utstedt, men bokføringen kunne ikke fullføres. "
+                "Prøv bokføring på nytt."
+            ),
+        ) from exc
+
+    document["accounting_status"] = "posted"
+    document["accounting_last_error"] = None
+    document["issue_journal_entry_id"] = entry.get("id")
+    document["issue_journal_number"] = entry.get("journal_number")
+    document["updated_at"] = now()
+    container.upsert_item(document)
+    return document
 
 
 def _validate_issue(document: dict, farm: dict) -> tuple[dict, dict, dict]:
@@ -580,10 +630,35 @@ def issue_sales_invoice(
     document["pdf_blob_name"] = upload["blob_name"]
     document["pdf_generated_at"] = now()
     document["issued_at"] = now()
+    document["accounting_status"] = "pending"
     document["updated_by_user_id"] = access.current.user["user_id"]
     document["version"] = int(document.get("version") or 1) + 1
     document["updated_at"] = now()
     container.upsert_item(document)
+
+    # Journal posting is idempotent; failure keeps the invoice issued with
+    # accounting_status=error and a retry endpoint.
+    document = _post_issue_accounting(farm_id, document, access.current.user["user_id"], container)
+    return _invoice_response(document)
+
+
+@router.post("/farms/{farm_id}/sales-invoices/{invoice_id}/post-accounting")
+def post_sales_invoice_accounting(
+    invoice_id: str,
+    access: AuthorizedFarm = Depends(require_farm_permission(Permission.SALES_INVOICE_ISSUE, require_csrf_protection=True)),
+) -> dict:
+    """Retry idempotent journal posting for an issued invoice."""
+    farm_id = str(access.farm["id"])
+    container = get_sales_invoices_container()
+    document = _read_invoice(farm_id, invoice_id)
+    if document.get("status") not in {"issued", "sent", "paid"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Fakturaen må være utstedt før bokføring.",
+        )
+    if document.get("accounting_status") == "posted" and document.get("issue_journal_entry_id"):
+        return _invoice_response(document)
+    document = _post_issue_accounting(farm_id, document, access.current.user["user_id"], container)
     return _invoice_response(document)
 
 
@@ -820,4 +895,20 @@ def mark_sales_invoice_paid(
     document["version"] = int(document.get("version") or 1) + 1
     document["updated_at"] = now()
     container.upsert_item(document)
+
+    # Payment journal posting is idempotent (source_key sales_invoice:<id>:payment).
+    if not document.get("payment_journal_entry_id"):
+        try:
+            entry = accounting_posting_service.post_sales_invoice_payment(
+                farm_id=farm_id,
+                invoice=document,
+                user_id=access.current.user["user_id"],
+            )
+            document["payment_journal_entry_id"] = entry.get("id")
+            document["payment_journal_number"] = entry.get("journal_number")
+            document["updated_at"] = now()
+            container.upsert_item(document)
+        except Exception:
+            # Invoice stays paid; payment posting can be retried via reconciliation.
+            pass
     return _invoice_response(document)
