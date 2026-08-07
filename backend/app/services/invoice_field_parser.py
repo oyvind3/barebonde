@@ -38,16 +38,30 @@ class FieldCandidate:
 
 _ORG_LABEL_PATTERNS = [
     (re.compile(r"org\.?\s*nr\.?\s*[:\-]?\s*$", re.I), 0.92, "org.nr"),
-    (re.compile(r"organisasjonsnummer\s*[:\-]?\s*$", re.I), 0.92, "organisasjonsnummer"),
-    (re.compile(r"foretaksnummer\s*[:\-]?\s*$", re.I), 0.90, "foretaksnummer"),
+    (re.compile(r"organisasjonsnum(?:mer|r)\.?\s*[:\-]?\s*$", re.I), 0.92, "organisasjonsnummer"),
+    (re.compile(r"foretaksnum(?:mer|r)\.?\s*[:\-]?\s*$", re.I), 0.90, "foretaksnummer"),
 ]
 
 _ORG_INLINE_PATTERNS = [
     # "Org.nr: 123 456 789" or "Org.nr 123456789"
     (re.compile(r"org\.?\s*nr\.?\s*[:\-]?\s*(\d[\d\s]{7,12}\d)", re.I), 0.92, "org.nr"),
-    (re.compile(r"organisasjonsnummer\s*[:\-]?\s*(\d[\d\s]{7,12}\d)", re.I), 0.92, "organisasjonsnummer"),
+    (re.compile(r"organisasjonsnum(?:mer|r)\.?\s*[:\-]?\s*(\d[\d\s]{7,12}\d)", re.I), 0.92, "organisasjonsnummer"),
     # "NO 123 456 789 MVA" or "NO123456789MVA"
     (re.compile(r"\bNO\s*(\d[\d\s]{7,12}\d)\s*MVA\b", re.I), 0.93, "NO...MVA"),
+    # "123 456 789 MVA" without country prefix (common in invoice footers)
+    (re.compile(r"\b(\d[\d\s]{7,12}\d)\s*MVA\b", re.I), 0.85, "...MVA"),
+]
+
+_SUPPLIER_LABELS = [
+    (re.compile(r"leverandør(?!\w)\s*[:\-]?\s*$", re.I), 0.85, "leverandør"),
+    (re.compile(r"selger(?!\w)\s*[:\-]?\s*$", re.I), 0.80, "selger"),
+    (re.compile(r"avsender(?!\w)\s*[:\-]?\s*$", re.I), 0.78, "avsender"),
+]
+
+_SUPPLIER_INLINE = [
+    (re.compile(r"leverandør(?!\w)\s*[:\-]?\s*(.{3,80})", re.I), 0.85, "leverandør"),
+    (re.compile(r"selger(?!\w)\s*[:\-]?\s*(.{3,80})", re.I), 0.80, "selger"),
+    (re.compile(r"avsender(?!\w)\s*[:\-]?\s*(.{3,80})", re.I), 0.78, "avsender"),
 ]
 
 _INVOICE_NUMBER_LABELS = [
@@ -92,16 +106,15 @@ _DUE_DATE_INLINE = [
 ]
 
 _TOTAL_LABELS = [
-    (re.compile(r"(?:beløp\s+)?å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "å betale"),
-    (re.compile(r"beløp\s+å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "beløp å betale"),
-    (re.compile(r"sum\s+å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "sum å betale"),
+    (re.compile(r"(?:beløp\s+)?[åa]\s+betale\s*[:\-]?\s*$", re.I), 0.95, "å betale"),
+    (re.compile(r"beløp\s+[åa]\s+betale\s*[:\-]?\s*$", re.I), 0.95, "beløp å betale"),
+    (re.compile(r"sum\s+[åa]\s+betale\s*[:\-]?\s*$", re.I), 0.95, "sum å betale"),
     (re.compile(r"total(?:t)?\s*(?:inkl\.?\s*mva\.?)?\s*[:\-]?\s*$", re.I), 0.90, "total"),
     (re.compile(r"sum\s+inkl\.?\s*mva\.?\s*[:\-]?\s*$", re.I), 0.92, "sum inkl. mva"),
-    (re.compile(r"å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "å betale"),
 ]
 
 _TOTAL_INLINE = [
-    (re.compile(r"(?:beløp\s+)?å\s+betale\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.95, "å betale"),
+    (re.compile(r"(?:beløp\s+)?[åa]\s+betale\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.95, "å betale"),
     (re.compile(r"total(?:t)?\s*(?:inkl\.?\s*mva\.?)?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.90, "total"),
     (re.compile(r"sum\s+inkl\.?\s*mva\.?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.92, "sum inkl. mva"),
 ]
@@ -118,15 +131,22 @@ _EXCL_VAT_INLINE = [
     (re.compile(r"netto\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.85, "netto"),
 ]
 
+# Negative lookbehind: "MVA" preceded by "eks." / "inkl." (with or without a
+# following space) is not a VAT amount. Each lookbehind must be fixed-length.
+_VAT_NOT_EXCL = (
+    r"(?<!eks\.\s)(?<!eks\.)(?<!eks\s)"
+    r"(?<!inkl\.\s)(?<!inkl\.)(?<!inkl\s)"
+)
+
 _VAT_LABELS = [
-    (re.compile(r"(?:herav\s+)?mva(?:\.?\s*beløp)?\s*[:\-]?\s*$", re.I), 0.90, "mva"),
-    (re.compile(r"mva\s*\d+\s*%\s*[:\-]?\s*$", re.I), 0.88, "mva %"),
-    (re.compile(r"merverdiavgift\s*[:\-]?\s*$", re.I), 0.88, "merverdiavgift"),
+    (re.compile(_VAT_NOT_EXCL + r"(?:herav\s+)?mva(?:\.?\s*beløp)?\s*[:\-]?\s*$", re.I), 0.90, "mva"),
+    (re.compile(_VAT_NOT_EXCL + r"mva\s*\d+\s*%\s*[:\-]?\s*$", re.I), 0.88, "mva %"),
+    (re.compile(_VAT_NOT_EXCL + r"merverdiavgift\s*[:\-]?\s*$", re.I), 0.88, "merverdiavgift"),
 ]
 
 _VAT_INLINE = [
-    (re.compile(r"(?:herav\s+)?mva(?:\.?\s*beløp)?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.90, "mva"),
-    (re.compile(r"merverdiavgift\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.88, "merverdiavgift"),
+    (re.compile(_VAT_NOT_EXCL + r"(?:herav\s+)?mva(?:\.?\s*beløp)?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.90, "mva"),
+    (re.compile(_VAT_NOT_EXCL + r"merverdiavgift\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.88, "merverdiavgift"),
 ]
 
 _KID_LABELS = [
@@ -178,9 +198,26 @@ class InvoiceFieldParser:
         invoice_number = self._extract_invoice_number(lines)
         invoice_date = self._extract_invoice_date(lines)
         due_date = self._extract_due_date(lines)
-        amount_total = self._extract_total_amount(lines)
         amount_excl_vat = self._extract_amount_excl_vat(lines)
         amount_vat = self._extract_vat_amount(lines)
+        amount_total = self._extract_total_amount(lines)
+
+        # Derived fallback: if no labeled total was found but both excl and vat
+        # are present and consistent, suggest total = excl + vat.
+        if amount_total is None and amount_excl_vat and amount_vat:
+            try:
+                derived = float(amount_excl_vat.value) + float(amount_vat.value)
+                if derived > 0:
+                    amount_total = FieldCandidate(
+                        value=str(derived),
+                        confidence=0.55,
+                        source="inferred",
+                        needs_review=True,
+                        label_context="derived (eks. MVA + MVA)",
+                    )
+            except (ValueError, TypeError):
+                pass
+
         currency = self._extract_currency(normalized)
         kid = self._extract_kid(lines)
         bank_account = self._extract_bank_account(lines)
@@ -435,8 +472,9 @@ class InvoiceFieldParser:
                                 break
 
         if not candidates:
-            # Last resort: find all amounts
-            text = "\n".join(lines)
+            # Last resort: find all amounts, but mask out bank account numbers
+            # so "1234.56.78901" is not misread as amount 1234.56.
+            text = self._mask_bank_accounts("\n".join(lines))
             all_amounts = self._find_all_amounts(text)
             for amount in all_amounts[:3]:
                 candidates.append((amount, 0.2, ""))
@@ -744,6 +782,15 @@ class InvoiceFieldParser:
             return float(normalized)
         except (ValueError, TypeError):
             return None
+
+    def _mask_bank_accounts(self, text: str) -> str:
+        """Mask Norwegian bank account numbers so they are not parsed as amounts.
+
+        A bank account like "1234.56.78901" would otherwise match amount regexes
+        and be misread as 1234.56. We replace them with a placeholder.
+        """
+        bank_re = re.compile(r"\d{4}[.\s]?\d{2}[.\s]?\d{5}")
+        return bank_re.sub("BANKKONTO", text)
 
     def _find_all_amounts(self, text: str) -> list[float]:
         """Find all numeric amounts in text."""
