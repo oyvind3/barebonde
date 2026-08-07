@@ -157,7 +157,7 @@ def create_customer(
     access: AuthorizedFarm = Depends(require_farm_permission(Permission.CUSTOMER_CREATE, require_csrf_protection=True)),
 ) -> dict:
     farm_id = str(access.farm["id"])
-    name = request.name.strip()
+    name = (request.name or "").strip()
     if not name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kunden må ha et navn.")
 
@@ -169,7 +169,14 @@ def create_customer(
             detail="Organisasjonsnummer må bestå av nøyaktig 9 sifre.",
         )
     org_number = org_number_raw or ""
-    email = validate_email(request.email)
+    
+    # Validate email format
+    email = (request.email or "").strip()
+    if email and not EMAIL_PATTERN.match(email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="E-postadressen er ugyldig.",
+        )
 
     if org_number:
         existing = _find_by_org_number(farm_id, org_number)
@@ -249,7 +256,13 @@ def patch_customer(
         updates.pop("org_number")
 
     if "email" in updates:
-        document["email"] = validate_email(updates.pop("email"))
+        email_raw = (updates.pop("email") or "").strip()
+        if email_raw and not EMAIL_PATTERN.match(email_raw):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="E-postadressen er ugyldig.",
+            )
+        document["email"] = email_raw
 
     if "name" in updates:
         name = (updates.pop("name") or "").strip()
