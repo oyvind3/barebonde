@@ -25,7 +25,7 @@ from app.db.cosmos_client import (
     get_farm_settings_container,
     get_sales_invoices_container,
 )
-from app.middleware.rate_limiter import check_rate_limit
+from app.middleware.rate_limiter import rate_limit_dependency
 from app.services.email_service import EmailDeliveryError, send_transactional_email, validate_plunk_configured
 from app.services.sales_invoice_calculation import (
     SUPPORTED_VAT_RATES,
@@ -526,7 +526,7 @@ def cancel_sales_invoice(
 def issue_sales_invoice(
     invoice_id: str,
     access: AuthorizedFarm = Depends(require_farm_permission(Permission.SALES_INVOICE_ISSUE, require_csrf_protection=True)),
-    _: None = Depends(check_rate_limit(limit_type="invoice_issue")),
+    _: None = Depends(rate_limit_dependency("invoice_issue")),
 ) -> dict:
     farm_id = str(access.farm["id"])
     container = get_sales_invoices_container()
@@ -759,7 +759,7 @@ async def _deliver_invoice(farm_id: str, document: dict, container) -> dict:
 async def send_sales_invoice(
     invoice_id: str,
     access: AuthorizedFarm = Depends(require_farm_permission(Permission.SALES_INVOICE_SEND, require_csrf_protection=True)),
-    _: None = Depends(check_rate_limit(limit_type="invoice_send")),
+    _: None = Depends(rate_limit_dependency("invoice_send")),
 ) -> dict:
     farm_id = str(access.farm["id"])
     container = get_sales_invoices_container()
@@ -782,7 +782,7 @@ async def send_sales_invoice(
 async def resend_sales_invoice(
     invoice_id: str,
     access: AuthorizedFarm = Depends(require_farm_permission(Permission.SALES_INVOICE_SEND, require_csrf_protection=True)),
-    _: None = Depends(check_rate_limit(limit_type="invoice_send")),
+    _: None = Depends(rate_limit_dependency("invoice_send")),
 ) -> dict:
     farm_id = str(access.farm["id"])
     container = get_sales_invoices_container()

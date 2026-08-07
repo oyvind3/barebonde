@@ -263,24 +263,35 @@ async def check_rate_limit(
     request: Request,
     limit_type: str = "default",
 ) -> None:
-    """Dependency to check rate limit for specific endpoints.
-    
-    Use this for fine-grained control on individual endpoints.
-    
-    Example:
-        @router.post("/sensitive-action")
-        async def sensitive_action(
-            _: None = Depends(check_rate_limit(limit_type="auth_register")),
-        ):
-            ...
+    """Check rate limit for a specific endpoint.
+
+    Prefer rate_limit_dependency() for use with Depends, since this
+    function requires the request instance at call time.
     """
     config = RATE_LIMITS.get(limit_type, RATE_LIMITS["default"])
     key = _create_rate_limit_key(request, limit_type)
     allowed, retry_after = await _rate_limiter.is_allowed(key, config)
-    
+
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="For mange forespørsler. Vennligst prøv igjen senere.",
             headers={"Retry-After": str(int(retry_after) + 1)},
         )
+
+
+def rate_limit_dependency(limit_type: str = "default") -> Callable:
+    """Build a FastAPI dependency that enforces a named rate limit.
+
+    Example:
+        @router.post("/sensitive-action")
+        async def sensitive_action(
+            _: None = Depends(rate_limit_dependency("auth_register")),
+        ):
+            ...
+    """
+
+    async def _dependency(request: Request) -> None:
+        await check_rate_limit(request, limit_type)
+
+    return _dependency
