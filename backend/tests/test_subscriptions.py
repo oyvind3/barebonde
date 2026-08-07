@@ -212,6 +212,7 @@ def make_client(monkeypatch, state: SubscriptionRouteState) -> TestClient:
     monkeypatch.setattr(subscriptions, "SubscriptionService", FakeSubscriptionService)
     monkeypatch.setattr(entitlement_dependency, "SubscriptionService", FakeSubscriptionService)
     monkeypatch.setattr(accounting, "get_transactions_container", EmptyTransactions)
+    monkeypatch.setattr(accounting.journal_service, "list_entries", lambda farm_id, **_: [])
 
     app = FastAPI()
     app.include_router(me.router, prefix="/api")
