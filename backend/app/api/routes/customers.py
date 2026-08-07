@@ -27,7 +27,11 @@ def now() -> str:
 
 
 def normalize_org_number(value: Optional[str]) -> str:
-    """Normalize a Norwegian org number to 9 digits, or empty string."""
+    """Normalize a Norwegian org number to 9 digits, or empty string.
+    
+    Note: This function is kept for backwards compatibility but is no longer used
+    in create_customer/patch_customer endpoints since Pydantic now validates the pattern.
+    """
     cleaned = re.sub(r"[\s.]", "", value or "")
     if not cleaned:
         return ""
@@ -51,7 +55,7 @@ def validate_email(value: Optional[str]) -> str:
 
 class CustomerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
-    org_number: Optional[str] = None
+    org_number: Optional[str] = Field(default=None, pattern=r"^\d{9}$")
     email: Optional[str] = Field(default=None, max_length=254)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
@@ -62,7 +66,7 @@ class CustomerCreate(BaseModel):
 
 class CustomerPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=160)
-    org_number: Optional[str] = None
+    org_number: Optional[str] = Field(default=None, pattern=r"^\d{9}$")
     email: Optional[str] = Field(default=None, max_length=254)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
@@ -157,7 +161,8 @@ def create_customer(
     if not name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kunden må ha et navn.")
 
-    org_number = normalize_org_number(request.org_number)
+    # org_number is already validated by Pydantic pattern, just normalize whitespace
+    org_number = (request.org_number or "").strip() or ""
     email = validate_email(request.email)
 
     if org_number:
@@ -219,7 +224,8 @@ def patch_customer(
     updates = request.model_dump(exclude_unset=True)
 
     if "org_number" in updates:
-        new_org = normalize_org_number(updates["org_number"])
+        # org_number is already validated by Pydantic pattern, just normalize whitespace
+        new_org = (updates["org_number"] or "").strip() or ""
         if new_org and new_org != (document.get("org_number") or ""):
             existing = _find_by_org_number(farm_id, new_org)
             if existing and existing.get("id") != customer_id:
