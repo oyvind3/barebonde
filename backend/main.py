@@ -3,12 +3,44 @@ Barebonde Backend - FastAPI main entry point
 Landbruksplattform for norske bønder og små landbruksforetak i norge
 """
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import json
+from typing import Any
 
-from app.core.config import settings
-from app.api.routes import health, farms, accounting, auth, me, subscriptions, profile, onboarding, settings as farm_settings, invitations, customers, sales_invoices
-from app.middleware.rate_limiter import setup_rate_limiting
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class JSONStringMiddleware(BaseHTTPMiddleware):
+    """Middleware to handle JSON sent as string in text/plain content-type.
+    
+    This is a temporary fix for frontend sending JSON.stringify'd objects
+    instead of proper JSON objects.
+    """
+    
+    async def dispatch(self, request: Request, call_next):
+        # Only process POST/PUT/PATCH requests with text/plain that contain JSON
+        if request.method in ["POST", "PUT", "PATCH"]:
+            content_type = request.headers.get("content-type", "")
+            if "text/plain" in content_type:
+                body = await request.body()
+                try:
+                    # Try to parse as JSON
+                    parsed = json.loads(body.decode("utf-8"))
+                    if isinstance(parsed, dict):
+                        # Replace the request body with parsed JSON
+                        request._body = json.dumps(parsed).encode("utf-8")
+                        request.headers._list = [
+                            (k.encode(), v.encode()) if isinstance(k, str) else (k, v)
+                            for k, v in request.headers.items()
+                            if k.lower() != "content-length"
+                        ]
+                        request.headers._list.append((b"content-type", b"application/json"))
+                        request.headers._list.append((b"content-length", str(len(request._body)).encode()))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass  # Not valid JSON, continue as-is
+        
+        return await call_next(request)
 
 
 app = FastAPI(
@@ -25,6 +57,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Handle JSON sent as string workaround
+app.add_middleware(JSONStringMiddleware)
 
 # Rate limiting - critical for production security
 setup_rate_limiting(app)
