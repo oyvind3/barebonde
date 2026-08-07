@@ -187,7 +187,7 @@ def make_client(monkeypatch, *, role="owner", documents=None, transactions=None,
             "id": f"journal-entry:{kwargs.get('source_key', 'test')}",
             "type": "journal_entry",
             "farm_id": kwargs["farm_id"],
-            "journal_number": 1,
+            "journal_number": "2026-000001",
             "posting_date": kwargs.get("posting_date", "2026-08-01"),
             "lines": kwargs.get("lines", []),
         }
@@ -381,7 +381,7 @@ def test_booking_is_partition_scoped_creates_one_transaction_and_rejects_retry(m
     assert first.status_code == 200
     assert first.json()["status"] == "ført"
     assert second.status_code == 409
-    created = state.transactions.items["transaction:voucher-a"]
+    created = state.documents.items["journal-entry:voucher:voucher-a:booking"]
     assert created["farm_id"] == "farm-a"
     assert created["created_by_user_id"] == "user-a"
 
