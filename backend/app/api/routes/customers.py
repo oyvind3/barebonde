@@ -161,11 +161,11 @@ def create_customer(
     if not name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kunden må ha et navn.")
 
-    # Normalize and validate org_number
+    # Normalize and validate org_number (treat empty/whitespace as None)
     org_number_raw = (request.org_number or "").strip()
     if org_number_raw and not ORG_NUMBER_PATTERN.match(org_number_raw):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Organisasjonsnummer må bestå av nøyaktig 9 sifre.",
         )
     org_number = org_number_raw or ""
@@ -230,11 +230,11 @@ def patch_customer(
     updates = request.model_dump(exclude_unset=True)
 
     if "org_number" in updates:
-        # Normalize and validate org_number
+        # Normalize and validate org_number (treat empty/whitespace as None)
         new_org_raw = (updates["org_number"] or "").strip()
         if new_org_raw and not ORG_NUMBER_PATTERN.match(new_org_raw):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Organisasjonsnummer må bestå av nøyaktig 9 sifre.",
             )
         new_org = new_org_raw or ""
