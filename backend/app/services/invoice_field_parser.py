@@ -165,11 +165,13 @@ _BANK_LABELS = [
     (re.compile(r"kontonummer\s*[:\-]?\s*$", re.I), 0.90, "kontonummer"),
     (re.compile(r"konto\s*nr\.?\s*[:\-]?\s*$", re.I), 0.85, "konto nr"),
     (re.compile(r"giro\s*konto\s*[:\-]?\s*$", re.I), 0.85, "girokonto"),
+    (re.compile(r"^konto\s*[:\-]?\s*$", re.I), 0.80, "konto"),
 ]
 
 _BANK_INLINE = [
     (re.compile(r"bank\s*konto(?:\s*nr\.?)?\s*[:\-]?\s*(\d{4}[.\s]?\d{2}[.\s]?\d{5})", re.I), 0.90, "bankkonto"),
     (re.compile(r"kontonummer\s*[:\-]?\s*(\d{4}[.\s]?\d{2}[.\s]?\d{5})", re.I), 0.90, "kontonummer"),
+    (re.compile(r"\bkonto\s*[:\-]?\s*(\d{4}[.\s]?\d{2}[.\s]?\d{5})", re.I), 0.85, "konto"),
 ]
 
 _DATE_RE = re.compile(r"\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2}")
@@ -200,7 +202,7 @@ class InvoiceFieldParser:
         due_date = self._extract_due_date(lines)
         amount_excl_vat = self._extract_amount_excl_vat(lines)
         amount_vat = self._extract_vat_amount(lines)
-        amount_total = self._extract_total_amount(lines)
+        amount_total = self._extract_total_amount(lines, amount_excl_vat, amount_vat)
 
         # Derived fallback: if no labeled total was found but both excl and vat
         # are present and consistent, suggest total = excl + vat.
@@ -224,6 +226,7 @@ class InvoiceFieldParser:
         description = self._extract_description(lines)
 
         # --- Cross-checks ---
+        self._resolve_identifier_conflicts(org_number, kid, bank_account, warnings)
         self._cross_check_amounts(amount_total, amount_excl_vat, amount_vat, warnings)
         self._cross_check_dates(invoice_date, due_date, warnings)
 
@@ -262,6 +265,8 @@ class InvoiceFieldParser:
         2. Try label-only patterns: if a line matches a label, look at the
            same line remainder and the next `max_distance` lines for a value.
         """
+        candidates: list[FieldCandidate] = []
+
         # Pass 1: inline patterns
         for line in lines:
             for pattern, base_conf, label_name in inline_patterns:
@@ -269,12 +274,14 @@ class InvoiceFieldParser:
                 if match:
                     value = match.group(1).strip()
                     if value:
-                        return FieldCandidate(
-                            value=value,
-                            confidence=base_conf,
-                            source="ocr",
-                            needs_review=base_conf < 0.85,
-                            label_context=label_name,
+                        candidates.append(
+                            FieldCandidate(
+                                value=value,
+                                confidence=base_conf,
+                                source="ocr",
+                                needs_review=base_conf < 0.85,
+                                label_context=label_name,
+                            )
                         )
 
         # Pass 2: label on its own line, value on same/next line(s)
@@ -285,13 +292,16 @@ class InvoiceFieldParser:
                     remainder = pattern.sub("", line).strip()
                     val_match = value_regex.search(remainder)
                     if val_match:
-                        return FieldCandidate(
-                            value=val_match.group(0).strip(),
-                            confidence=base_conf,
-                            source="ocr",
-                            needs_review=base_conf < 0.85,
-                            label_context=label_name,
+                        candidates.append(
+                            FieldCandidate(
+                                value=val_match.group(0).strip(),
+                                confidence=base_conf,
+                                source="ocr",
+                                needs_review=base_conf < 0.85,
+                                label_context=label_name,
+                            )
                         )
+                        continue
                     # Check next lines with distance penalty
                     for offset in range(1, max_distance + 1):
                         if idx + offset >= len(lines):
@@ -301,14 +311,45 @@ class InvoiceFieldParser:
                         if val_match:
                             distance_penalty = 0.05 * offset
                             conf = max(0.3, base_conf - distance_penalty)
-                            return FieldCandidate(
-                                value=val_match.group(0).strip(),
-                                confidence=conf,
-                                source="ocr",
-                                needs_review=conf < 0.80,
-                                label_context=label_name,
+                            candidates.append(
+                                FieldCandidate(
+                                    value=val_match.group(0).strip(),
+                                    confidence=conf,
+                                    source="ocr",
+                                    needs_review=conf < 0.80,
+                                    label_context=label_name,
+                                )
                             )
-        return None
+                            break
+
+        if not candidates:
+            return None
+        return self._select_best_candidate(candidates)
+
+    def _select_best_candidate(self, candidates: list[FieldCandidate]) -> FieldCandidate:
+        """Pick the best candidate, rewarding uniqueness and penalizing conflicts."""
+        # Deduplicate by normalized value, keeping highest confidence per value
+        by_value: dict[str, FieldCandidate] = {}
+        for cand in candidates:
+            key = re.sub(r"\s+", "", cand.value).casefold()
+            if key not in by_value or cand.confidence > by_value[key].confidence:
+                by_value[key] = cand
+        unique = sorted(by_value.values(), key=lambda c: -c.confidence)
+        best = unique[0]
+
+        if len(unique) == 1:
+            # Unique candidate: small confidence bonus
+            best.confidence = min(1.0, best.confidence + 0.02)
+        else:
+            distinct = {re.sub(r"\s+", "", u.value) for u in unique}
+            if len(distinct) > 1:
+                # Multiple distinct values found – reduce confidence, flag review
+                best.confidence = max(0.3, best.confidence - 0.15)
+                best.needs_review = True
+                best.warnings.append("Flere mulige verdier funnet – kontroller")
+
+        best.needs_review = best.needs_review or best.confidence < 0.80
+        return best
 
     # ------------------------------------------------------------------
     # Field extractors
@@ -430,10 +471,17 @@ class InvoiceFieldParser:
             candidate.warnings.append("Kunne ikke tolke datoformat")
         return candidate
 
-    def _extract_total_amount(self, lines: list[str]) -> Optional[FieldCandidate]:
+    def _extract_total_amount(
+        self,
+        lines: list[str],
+        amount_excl_vat: Optional[FieldCandidate] = None,
+        amount_vat: Optional[FieldCandidate] = None,
+    ) -> Optional[FieldCandidate]:
         """Extract total amount including VAT.
 
-        Prioritizes amounts linked to explicit total/payment labels.
+        Prioritizes amounts linked to explicit total/payment labels. When both
+        excl-VAT and VAT amounts are known, candidates matching their sum get a
+        confidence bonus (mathematical consistency).
         """
         candidates: list[tuple[float, float, str]] = []
 
@@ -473,8 +521,9 @@ class InvoiceFieldParser:
 
         if not candidates:
             # Last resort: find all amounts, but mask out bank account numbers
-            # so "1234.56.78901" is not misread as amount 1234.56.
+            # and dates so "1234.56.78901" or "12.05.2026" are not misread.
             text = self._mask_bank_accounts("\n".join(lines))
+            text = self._mask_dates(text)
             all_amounts = self._find_all_amounts(text)
             for amount in all_amounts[:3]:
                 candidates.append((amount, 0.2, ""))
@@ -482,14 +531,31 @@ class InvoiceFieldParser:
         if not candidates:
             return None
 
-        # Sort by confidence first, then by amount
-        candidates.sort(key=lambda x: (-x[1], -x[0]))
+        # Math consistency bonus: if excl + vat is known, reward matching totals
+        expected_sum: Optional[float] = None
+        if amount_excl_vat and amount_vat:
+            try:
+                expected_sum = float(amount_excl_vat.value) + float(amount_vat.value)
+            except (ValueError, TypeError):
+                expected_sum = None
+
+        def sort_key(item: tuple[float, float, str]) -> tuple[float, float]:
+            amount, conf, _label = item
+            bonus = 0.0
+            if expected_sum is not None and abs(amount - expected_sum) <= max(0.5, expected_sum * 0.01):
+                bonus = 0.10
+            return (-(conf + bonus), -amount)
+
+        candidates.sort(key=sort_key)
         best = candidates[0]
+        final_conf = best[1]
+        if expected_sum is not None and abs(best[0] - expected_sum) <= max(0.5, expected_sum * 0.01):
+            final_conf = min(1.0, final_conf + 0.10)
         return FieldCandidate(
             value=str(best[0]),
-            confidence=best[1],
-            source="ocr" if best[1] > 0.5 else "inferred",
-            needs_review=best[1] < 0.7,
+            confidence=final_conf,
+            source="ocr" if final_conf > 0.5 else "inferred",
+            needs_review=final_conf < 0.7,
             label_context=best[2] if best[2] else None,
         )
 
@@ -670,6 +736,44 @@ class InvoiceFieldParser:
             vat.confidence = max(0.3, vat.confidence - 0.2)
             vat.needs_review = True
 
+    def _resolve_identifier_conflicts(
+        self,
+        org_number: Optional[FieldCandidate],
+        kid: Optional[FieldCandidate],
+        bank_account: Optional[FieldCandidate],
+        warnings: list[str],
+    ) -> None:
+        """Detect when the same digit sequence is claimed by multiple identifier fields.
+
+        If org number, KID, and bank account overlap, reduce confidence on the
+        lower-confidence field and add a warning so the user can verify.
+        """
+        fields: list[tuple[str, Optional[FieldCandidate]]] = [
+            ("organisasjonsnummer", org_number),
+            ("KID", kid),
+            ("bankkonto", bank_account),
+        ]
+        present = [(name, cand) for name, cand in fields if cand is not None]
+        if len(present) < 2:
+            return
+
+        for i in range(len(present)):
+            for j in range(i + 1, len(present)):
+                name_a, cand_a = present[i]
+                name_b, cand_b = present[j]
+                digits_a = re.sub(r"\D", "", cand_a.value)
+                digits_b = re.sub(r"\D", "", cand_b.value)
+                if not digits_a or not digits_b:
+                    continue
+                if digits_a == digits_b or digits_a in digits_b or digits_b in digits_a:
+                    warnings.append(
+                        f"Samme tallsekvens brukt som både {name_a} og {name_b} – kontroller"
+                    )
+                    # Penalize the lower-confidence candidate
+                    lower = cand_b if cand_a.confidence >= cand_b.confidence else cand_a
+                    lower.confidence = max(0.3, lower.confidence - 0.2)
+                    lower.needs_review = True
+
     def _cross_check_dates(
         self,
         invoice_date: Optional[FieldCandidate],
@@ -791,6 +895,15 @@ class InvoiceFieldParser:
         """
         bank_re = re.compile(r"\d{4}[.\s]?\d{2}[.\s]?\d{5}")
         return bank_re.sub("BANKKONTO", text)
+
+    def _mask_dates(self, text: str) -> str:
+        """Mask date strings so they are not parsed as amounts.
+
+        Dates like "12.05.2026" or "12/05/2026" would otherwise match amount
+        regexes. We replace them with a placeholder before amount scanning.
+        """
+        date_re = re.compile(r"\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2}")
+        return date_re.sub("DATO", text)
 
     def _find_all_amounts(self, text: str) -> list[float]:
         """Find all numeric amounts in text."""
