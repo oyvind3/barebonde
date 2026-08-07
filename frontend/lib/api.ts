@@ -59,7 +59,7 @@ export type IdentityBootstrap = {
     canceled_at?: string | null
   } | null
   entitlements: Record<string, boolean>
-  onboarding?: { completed: boolean; current_step: string; completed_steps: string[]; completion_percent: number; interests: string[] }
+  onboarding?: { completed: boolean; current_step: string; completed_steps: string[]; completion_percent: number; total_steps: number; interests: string[] }
 }
 
 let csrfToken = ''

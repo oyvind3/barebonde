@@ -15,7 +15,10 @@ from app.services.membership_service import MembershipService
 router = APIRouter()
 CURRENT_TERMS_VERSION = "2026-08"
 INTERESTS = {"bilag", "bokforing", "rapporter", "fakturering", "ehf", "maskiner", "vedlikehold", "oppgaver", "avtaler_frister"}
-STEPS = ("identity", "profile", "farm", "farm_settings", "bank_account", "interests", "summary")
+# Pilot-onboarding teller bare steg som faktisk kan fullføres.  Bankkonto er et
+# betalingssteg som ikke inngår i piloten, og "summary" er en terminal markør,
+# ikke et eget steg.
+STEPS = ("identity", "profile", "farm", "interests")
 
 
 class OnboardingPatch(BaseModel):
@@ -34,7 +37,7 @@ def onboarding_status(user: dict, memberships: list[dict]) -> dict:
     if user.get("onboarding_interests"):
         completed.append("interests")
     current = str(user.get("onboarding_current_step") or next((step for step in STEPS if step not in completed), "summary"))
-    return {"completed": bool(user.get("onboarding_completed_at")), "current_step": current, "completed_steps": completed, "completion_percent": round(len(completed) / len(STEPS) * 100), "interests": list(user.get("onboarding_interests") or [])}
+    return {"completed": bool(user.get("onboarding_completed_at")), "current_step": current, "completed_steps": completed, "completion_percent": round(len(completed) / len(STEPS) * 100), "total_steps": len(STEPS), "interests": list(user.get("onboarding_interests") or [])}
 
 
 @router.get("/onboarding")

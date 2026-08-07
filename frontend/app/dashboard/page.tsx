@@ -165,7 +165,7 @@ export default function Dashboard() {
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
                 <p className="font-semibold text-stone-900">Kom i gang med Barebonde</p>
-                <p className="text-sm text-stone-700">{identity.onboarding.completed_steps.length} av 7 steg registrert. Bankkonto er valgfri og blokkerer ikke bruk.</p>
+                <p className="text-sm text-stone-700">{identity.onboarding.completed_steps.length} av {identity.onboarding.total_steps} steg registrert.</p>
               </div>
               <Button href="/onboarding" variant="outline">Fortsett</Button>
             </div>

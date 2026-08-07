@@ -1,6 +1,6 @@
 # Barebonde – statusrapport
 
-**Oppdatert:** 8. juli 2026
+**Oppdatert:** 8. juli 2026 (Epic 2 – fortsettelse fullført)
 **Status:** Eksisterende løsning er i aktiv utvikling; dette dokumentet beskriver verifiserbar repository-status, ikke en produksjonsgodkjenning.
 
 ## Aktiv arkitektur
@@ -19,6 +19,10 @@ BRREG-oppslag, gårdsoppsett, bilag/OCR og Plunk-integrasjon finnes i repository
 Rollene `owner`, `manager` og `staff` bruker en sentral, statisk permission-katalog. Opprettelse, lesing, endring og medlemsliste for Farm er tenant-isolert. Bilag, dokumentmetadata, dokumentnedlasting, bokføring, transaksjonslisting og rapporter bruker nå Farm-scope i URL, aktivt medlemskap og permission. Muterende bilagsruter krever CSRF. Nye Blob-navn er bundet til Farm og servergenerert dokument-ID; API-et streamer autoriserte nedlastinger og returnerer ikke varige Blob-URL-er. Hver Farm har ett statisk, versjonert abonnement med serverberegnede entitlements. Usage er fortsatt ikke implementert.
 
 Bilagskontroll-flyten er implementert i `frontend/app/bilag/new/page.tsx`: brukeren laster opp PDF eller bilde, ser behandlingsstatus og dokumentet side ved side med redigerbare OCR-forslag, markerer usikre/manglende felt med «Kontroller», korrigerer verdier, lagrer brukerbekreftede verdier og bokfører bilaget med tydelig success-state. OCR-forslag er forslag; brukerbekreftede verdier er autoritative. Rate limiting er in-memory per instans.
+
+Bilagsdetaljside (`/bilag/[voucherId]`) er implementert via `frontend/app/bilag/detalj/page.tsx` og `frontend/components/bilag/VoucherDetailClient.tsx`. Siden viser dokumentpreview, status, alle OCR-felt og OCR-kontrollstatus. Ikke-bokførte bilag kan redigeres via eksisterende PATCH-endepunkt med delt feltskjema (`frontend/components/bilag/VoucherFields.tsx`). Bokførte bilag låser regnskapskritiske felt (beløp, dato, konto, MVA-kode, transaksjonstype) og tillater kun metadataendring, med forklaring om at korreksjonsflyt kreves.
+
+OCR-feltutvinning (`backend/app/services/invoice_field_parser.py` og `ocr_service.py`) bruker label-basert kandidat-scoring med støtte for norske etiketter (Org.nr, Fakturanr, Fakturadato, Forfallsdato, Å betale, Eks. MVA, MVA, KID), formatvalidering, checksum (KID/modulus), matematisk konsistens (eks. MVA + MVA ≈ total) og datorekkefølge. Konflikter reduserer confidence og legger til warnings som vises som «Kontroller» i frontend.
 
 Cosmos DB er den faktiske datalagringen. SQLAlchemy, PostgreSQL, Better Auth, ID-porten og Ory/Kratos er ikke aktive deler av dagens arkitektur.
 

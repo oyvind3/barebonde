@@ -11,6 +11,7 @@ interface State {
   current_step: string
   completed_steps: string[]
   completion_percent: number
+  total_steps: number
   interests: string[]
 }
 
@@ -105,17 +106,11 @@ export default function OnboardingPage() {
       }
     }
     
-    const optionalSteps = ['farm_settings', 'bank_account', 'interests']
+    const optionalSteps = ['interests']
     const missingOptional = optionalSteps.filter(step => !state.completed_steps.includes(step))
     
     if (missingOptional.length > 0) {
-      const stepMap: Record<string, { title: string; href: string }> = {
-        farm_settings: { title: 'Tilpass gårdsinnstillinger', href: '/settings/farm' },
-        bank_account: { title: 'Legg til bankkonto', href: '/settings/bank-accounts' },
-        interests: { title: 'Velg hva du vil bruke Barebonde til', href: '#interests' },
-      }
-      const next = missingOptional[0]
-      return { title: stepMap[next]?.title || 'Neste steg', href: stepMap[next]?.href || '#', priority: 'normal' }
+      return { title: 'Velg hva du vil bruke Barebonde til', href: '#interests', priority: 'normal' }
     }
     
     return { title: 'Fullfør onboarding', href: '#', priority: 'complete' }
@@ -157,7 +152,7 @@ export default function OnboardingPage() {
                     {state.completion_percent === 100 ? 'Gratulerer!' : 'Din fremdrift'}
                   </h2>
                   <p className="text-sm text-gray-600">
-                    {state.completed_steps.length} av 7 steg fullført
+                    {state.completed_steps.length} av {state.total_steps} steg fullført
                     {state.completion_percent === 100 ? ' - alt er klart!' : ''}
                   </p>
                 </div>
@@ -235,28 +230,7 @@ export default function OnboardingPage() {
             linkText={state.completed_steps.includes('farm') ? 'Se gård' : 'Opprett eller velg gård'}
           />
 
-          {/* Step 4: Farm settings */}
-          <OnboardingStep
-            stepNumber={4}
-            title="Gårdsinnstillinger"
-            description="Tilpass hvordan du vil drive gården"
-            isCompleted={state.completed_steps.includes('farm_settings')}
-            href="/settings/farm"
-            linkText="Åpne gårdsinnstillinger"
-          />
-
-          {/* Step 5: Bank account (optional) */}
-          <OnboardingStep
-            stepNumber={5}
-            title="Bankkonto"
-            description="Legg til bankkonto for enklere betalinger (valgfritt)"
-            isCompleted={state.completed_steps.includes('bank_account')}
-            href="/settings/bank-accounts"
-            linkText="Legg til bankkonto"
-            optional
-          />
-
-          {/* Step 6: Interests */}
+          {/* Step 4: Interests */}
           <section id="interests" className="border-b border-gray-100 pb-6 last:border-0">
             <div className="flex items-start gap-4">
               <div 
@@ -266,7 +240,7 @@ export default function OnboardingPage() {
                     : 'bg-gray-200 text-gray-600'
                 }`}
               >
-                {state.completed_steps.includes('interests') ? '✓' : '6'}
+                {state.completed_steps.includes('interests') ? '✓' : '4'}
               </div>
               <div className="flex-1">
                 <h2 className="font-semibold text-gray-900">
