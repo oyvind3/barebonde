@@ -55,7 +55,7 @@ def validate_email(value: Optional[str]) -> str:
 
 class CustomerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
-    org_number: Optional[str] = Field(default=None)
+    org_number: Optional[str] = Field(default=None, max_length=20)
     email: Optional[str] = Field(default=None, max_length=254)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
@@ -66,7 +66,7 @@ class CustomerCreate(BaseModel):
 
 class CustomerPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=160)
-    org_number: Optional[str] = Field(default=None)
+    org_number: Optional[str] = Field(default=None, max_length=20)
     email: Optional[str] = Field(default=None, max_length=254)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
