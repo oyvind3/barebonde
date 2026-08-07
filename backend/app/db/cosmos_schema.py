@@ -31,6 +31,8 @@ CONTAINER_DEFINITIONS: tuple[ContainerDefinition, ...] = (
     ContainerDefinition("farm_settings", "/farm_id"),
     ContainerDefinition("bank_accounts", "/farm_id"),
     ContainerDefinition("farm_invitations", "/farm_id", default_ttl=2592000),
+    ContainerDefinition("customers", "/farm_id"),
+    ContainerDefinition("sales_invoices", "/farm_id"),
 )
 
 CONTAINERS_BY_NAME = {definition.name: definition for definition in CONTAINER_DEFINITIONS}

@@ -20,3 +20,5 @@ azure-ai-formrecognizer==3.3.3
 pypdf==5.9.0
 # Azure Functions
 azure-functions==1.24.0
+# PDF generation for sales invoices
+reportlab==4.1.0

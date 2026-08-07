@@ -41,6 +41,15 @@ class Permission(str, Enum):
     TRANSACTION_DELETE = "transaction.delete"
     REPORT_BASIC_READ = "report.basic.read"
     REPORT_ADVANCED_READ = "report.advanced.read"
+    CUSTOMER_READ = "customer.read"
+    CUSTOMER_CREATE = "customer.create"
+    CUSTOMER_UPDATE = "customer.update"
+    SALES_INVOICE_READ = "sales_invoice.read"
+    SALES_INVOICE_CREATE = "sales_invoice.create"
+    SALES_INVOICE_UPDATE = "sales_invoice.update"
+    SALES_INVOICE_ISSUE = "sales_invoice.issue"
+    SALES_INVOICE_SEND = "sales_invoice.send"
+    SALES_INVOICE_MARK_PAID = "sales_invoice.mark_paid"
 
 
 ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
@@ -65,6 +74,15 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.TRANSACTION_UPDATE,
             Permission.REPORT_BASIC_READ,
             Permission.REPORT_ADVANCED_READ,
+            Permission.CUSTOMER_READ,
+            Permission.CUSTOMER_CREATE,
+            Permission.CUSTOMER_UPDATE,
+            Permission.SALES_INVOICE_READ,
+            Permission.SALES_INVOICE_CREATE,
+            Permission.SALES_INVOICE_UPDATE,
+            Permission.SALES_INVOICE_ISSUE,
+            Permission.SALES_INVOICE_SEND,
+            Permission.SALES_INVOICE_MARK_PAID,
         }
     ),
     "staff": frozenset(
@@ -76,6 +94,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.DOCUMENT_UPLOAD,
             Permission.DOCUMENT_DOWNLOAD,
             Permission.REPORT_BASIC_READ,
+            Permission.CUSTOMER_READ,
+            Permission.SALES_INVOICE_READ,
         }
     ),
 }

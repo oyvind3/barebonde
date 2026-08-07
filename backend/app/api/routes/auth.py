@@ -9,7 +9,6 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, field_validator, field_serializer
 
@@ -19,6 +18,11 @@ from app.api.routes.me import session_response, user_response
 from app.core.config import settings
 from app.core.security_tokens import IdentitySecurityConfigurationError
 from app.services.challenge_service import ChallengeService, InvalidChallengeError
+from app.services.email_service import (
+    EmailDeliveryError,
+    send_transactional_email,
+    validate_plunk_configured,
+)
 from app.services.identity_service import DisabledUserError, IdentityConflictError, IdentityError, IdentityService
 from app.services.password_service import PasswordService
 from app.services.session_service import InvalidSessionError, SessionService
@@ -26,13 +30,8 @@ from app.services.session_service import InvalidSessionError, SessionService
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-DEFAULT_PLUNK_API_URL = "https://next-api.useplunk.com/v1/send"
 DEFAULT_FRONTEND_URL = "https://barebonde.no"
 E164_PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
-
-
-class EmailDeliveryError(Exception):
-    """Raised when a transactional email cannot be submitted to Plunk."""
 
 
 def normalize_phone_number(value: str) -> str:
@@ -187,72 +186,9 @@ class MagicLinkVerifyRequest(BaseModel):
     token: str
 
 
-def _get_plunk_config() -> tuple[str, str, str, Optional[str], str]:
-    """Read Plunk configuration at request time without accepting public keys."""
-    token = (
-        os.getenv("PLUNK_SECRET_KEY")
-        or os.getenv("PLUNK_SECRET_API_KEY")
-        or os.getenv("PLUNK_API_TOKEN")
-        or ""
-    ).strip()
-    from_email = (os.getenv("PLUNK_FROM_EMAIL") or "").strip()
-    from_name = (os.getenv("PLUNK_FROM_NAME") or "Barebonde").strip()
-    reply_to = (os.getenv("PLUNK_REPLY_TO_EMAIL") or "").strip() or None
-    api_url = (os.getenv("PLUNK_API_URL") or DEFAULT_PLUNK_API_URL).strip()
-
-    if not token:
-        raise EmailDeliveryError("E-posttjenesten er ikke konfigurert med en Plunk secret key.")
-    if not token.startswith("sk_"):
-        raise EmailDeliveryError("Plunk-koden må være en secret key (sk_), ikke en public key (pk_).")
-    if not from_email:
-        raise EmailDeliveryError("PLUNK_FROM_EMAIL mangler. Den må være en avsender fra et verifisert domene i Plunk.")
-
-    return token, from_email, from_name, reply_to, api_url
-
-
-def _plunk_error_message(response: httpx.Response) -> str:
-    """Return a safe, concise provider message without logging response bodies."""
-    try:
-        payload = response.json()
-    except ValueError:
-        return f"Plunk svarte med HTTP {response.status_code}."
-
-    error = payload.get("error") if isinstance(payload, dict) else None
-    if isinstance(error, dict):
-        message = error.get("message")
-    else:
-        message = error or (payload.get("message") if isinstance(payload, dict) else None)
-    return str(message or f"Plunk svarte med HTTP {response.status_code}.")
-
-
 async def _send_plunk_email(*, to: str, subject: str, body: str) -> None:
     """Send one transactional email through Plunk's current public API."""
-    token, from_email, from_name, reply_to, api_url = _get_plunk_config()
-    sender: str | dict[str, str] = {"email": from_email, "name": from_name} if from_name else from_email
-    payload: dict[str, Any] = {"to": to, "from": sender, "subject": subject, "body": body}
-    if reply_to:
-        payload["reply"] = reply_to
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                api_url,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=10.0,
-            )
-    except httpx.HTTPError as exc:
-        raise EmailDeliveryError("Kunne ikke kontakte Plunk for å sende e-post.") from exc
-
-    if response.status_code >= 400:
-        raise EmailDeliveryError(_plunk_error_message(response))
-
-    try:
-        response_payload = response.json()
-    except ValueError:
-        response_payload = {}
-    if isinstance(response_payload, dict) and response_payload.get("success") is False:
-        raise EmailDeliveryError(_plunk_error_message(response))
+    await send_transactional_email(to=to, subject=subject, body=body)
 
 
 def _frontend_url() -> str:
@@ -306,7 +242,7 @@ async def _send_confirmation_email(
 ) -> None:
     """Send the onboarding e-mail link used to verify the address."""
     # Fail before creating a reusable challenge if delivery is not configured.
-    _get_plunk_config()
+    validate_plunk_configured()
     safe_name = html.escape(first_name or "Bonde")
     raw_token = ChallengeService().create_email_registration_challenge(
         email=email, registration_profile=registration_profile
@@ -436,7 +372,7 @@ async def send_magic_link(req: MagicLinkRequest) -> dict[str, str]:
     """Create a single-use e-mail login challenge and submit it through Plunk."""
     try:
         # Avoid persisting a valid challenge when no e-mail provider is configured.
-        _get_plunk_config()
+        validate_plunk_configured()
         raw_token = ChallengeService().create_email_login_challenge(
             email=str(req.email), first_name=req.first_name or "Bonde"
         )
@@ -463,7 +399,7 @@ async def send_magic_link(req: MagicLinkRequest) -> dict[str, str]:
 async def request_login_email(req: MagicLinkRequest) -> dict[str, str]:
     """Send a login link only for an already registered identity."""
     try:
-        _get_plunk_config()
+        validate_plunk_configured()
         raw_token = ChallengeService().create_email_login_challenge(email=str(req.email))
     except IdentityError as exc:
         if str(exc) == "account_not_found":
@@ -482,7 +418,7 @@ async def request_login_email(req: MagicLinkRequest) -> dict[str, str]:
 async def request_registration_email(req: MagicLinkRequest) -> dict[str, str]:
     """Start explicit registration without creating a User before verification."""
     try:
-        _get_plunk_config()
+        validate_plunk_configured()
         raw_token = ChallengeService().create_email_registration_challenge(email=str(req.email))
     except IdentityError as exc:
         if str(exc) == "account_already_exists":

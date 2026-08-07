@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [monthlyRows, setMonthlyRows] = useState<MonthlyRow[]>([])
   const [vat, setVat] = useState({ incoming_vat: 0, outgoing_vat: 0, estimated_settlement: 0 })
   const [journalCount, setJournalCount] = useState(0)
+  const [unpaidInvoiceCount, setUnpaidInvoiceCount] = useState(0)
 
   const farmId = activeFarm?.id || ''
 
@@ -65,6 +66,13 @@ export default function Dashboard() {
           setMonthlyRows(monthlyData.rows || [])
           setVat(vatData)
           setJournalCount((journalData.rows || []).length)
+        }
+
+        const invoicesRes = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/sales-invoices`, { signal: controller.signal })
+        if (invoicesRes.ok) {
+          const invoicesData = await invoicesRes.json()
+          const unpaid = (invoicesData.invoices || []).filter((invoice: { status: string }) => invoice.status === 'issued' || invoice.status === 'sent')
+          if (!controller.signal.aborted) setUnpaidInvoiceCount(unpaid.length)
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return
@@ -132,6 +140,9 @@ export default function Dashboard() {
           <div className="mt-4 md:mt-0 flex gap-3">
             <Button href="/bilag/new" variant="primary" showArrow>
               NYTT BILAG
+            </Button>
+            <Button href="/faktura/ny" variant="outline" showArrow>
+              OPPRETT FAKTURA
             </Button>
             <Button href="/reports" variant="outline" showArrow>
               RAPPORTER
@@ -205,6 +216,12 @@ export default function Dashboard() {
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Aktive bilag</p>
             <p className="text-3xl font-serif text-stone-900 font-bold">{journalCount}</p>
             <p className="text-xs text-stone-600 mt-1">Registrerte bilag</p>
+          </Card>
+
+          <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
+            <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Ubetalte fakturaer</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{unpaidInvoiceCount}</p>
+            <p className="text-xs text-stone-600 mt-1">Utstedt eller sendt</p>
           </Card>
         </div>
 

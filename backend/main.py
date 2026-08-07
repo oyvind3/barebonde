@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api.routes import health, farms, accounting, auth, me, subscriptions, profile, onboarding, settings as farm_settings, invitations
+from app.api.routes import health, farms, accounting, auth, me, subscriptions, profile, onboarding, settings as farm_settings, invitations, customers, sales_invoices
 from app.middleware.rate_limiter import setup_rate_limiting
 
 
@@ -40,6 +40,8 @@ app.include_router(subscriptions.router, prefix="/api", tags=["Subscriptions"])
 app.include_router(farm_settings.router, prefix="/api", tags=["Farm settings"])
 app.include_router(invitations.router, prefix="/api", tags=["Invitations"])
 app.include_router(accounting.router, tags=["Accounting"])
+app.include_router(customers.router, prefix="/api", tags=["Customers"])
+app.include_router(sales_invoices.router, prefix="/api", tags=["Sales invoices"])
 
 
 @app.get("/")

@@ -103,3 +103,13 @@ def get_bank_accounts_container() -> Any:
 def get_farm_invitations_container() -> Any:
     """Return the existing Farm-partitioned invitation container proxy."""
     return get_container_client("farm_invitations")
+
+
+def get_customers_container() -> Any:
+    """Return the Farm-partitioned customer container proxy."""
+    return get_container_client("customers")
+
+
+def get_sales_invoices_container() -> Any:
+    """Return the Farm-partitioned sales invoice container proxy."""
+    return get_container_client("sales_invoices")

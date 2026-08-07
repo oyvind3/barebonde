@@ -103,6 +103,8 @@ RATE_LIMITS = {
     "auth_register": RateLimitConfig(requests=5, seconds=60, key_prefix="auth_register"),  # 5 per minute
     "auth_login": RateLimitConfig(requests=10, seconds=60, key_prefix="auth_login"),  # 10 per minute
     "email_send": RateLimitConfig(requests=3, seconds=60, key_prefix="email_send"),  # 3 per minute
+    "invoice_issue": RateLimitConfig(requests=10, seconds=60, key_prefix="invoice_issue"),  # 10 per minute
+    "invoice_send": RateLimitConfig(requests=3, seconds=60, key_prefix="invoice_send"),  # 3 per minute
     "onboarding": RateLimitConfig(requests=30, seconds=60, key_prefix="onboarding"),  # 30 per minute
     "default": RateLimitConfig(requests=100, seconds=60, key_prefix="default"),  # 100 per minute
 }

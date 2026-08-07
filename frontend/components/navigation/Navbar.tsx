@@ -8,6 +8,7 @@ import { useIdentity } from '@/lib/identity'
 const APP_LINKS = [
   { href: '/dashboard', label: 'Oversikt' },
   { href: '/bilag', label: 'Bilag' },
+  { href: '/faktura', label: 'Faktura' },
   { href: '/reports', label: 'Rapporter' },
   { href: '/settings', label: 'Innstillinger' },
 ]
