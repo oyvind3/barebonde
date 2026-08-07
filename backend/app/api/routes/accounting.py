@@ -298,7 +298,7 @@ def _voucher_response(item: dict[str, Any]) -> VoucherResponse:
         ocr_suggested_supplier=item.get("ocr_suggested_supplier"),
         # Journal references
         journal_entry_id=item.get("journal_entry_id"),
-        journal_number=item.get("journal_number"),
+        journal_number=str(item.get("journal_number")) if item.get("journal_number") is not None else None,
         accounting_revision=int(item.get("accounting_revision") or 1),
     )
 

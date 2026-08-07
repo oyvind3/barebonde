@@ -13,6 +13,7 @@ os.environ.setdefault("IDENTITY_HMAC_KEY", "test-identity-hmac-key")
 from app.api.dependencies import farm_access, identity as identity_dependency
 from app.api.routes import accounting
 from app.core.permissions import permissions_for_role
+from app.services import journal_service
 from app.services.membership_service import InactiveMembershipError, MembershipNotFoundError
 from app.services.ocr_service import OCRResult
 from app.services.storage_service import StorageService
@@ -177,9 +178,30 @@ def make_client(monkeypatch, *, role="owner", documents=None, transactions=None,
     monkeypatch.setattr(accounting, "get_transactions_container", lambda: state.transactions)
     monkeypatch.setattr(accounting, "get_audit_logs_container", lambda: state.audits)
     monkeypatch.setattr(accounting, "storage_service", state.storage)
-    monkeypatch.setattr("app.db.cosmos_client.get_journal_entries_container", lambda: MemoryContainer())
-    monkeypatch.setattr(accounting.journal_service, "list_entries", lambda farm_id, **_: [])
-    monkeypatch.setattr(accounting.journal_service, "post_entry", lambda **kwargs: {"id": "journal-entry:test", "journal_number": 1})
+    
+    journal_container = MemoryContainer()
+    monkeypatch.setattr("app.db.cosmos_client.get_journal_entries_container", lambda: journal_container)
+    
+    def mock_post_entry(**kwargs):
+        entry = {
+            "id": f"journal-entry:{kwargs.get('source_key', 'test')}",
+            "type": "journal_entry",
+            "farm_id": kwargs["farm_id"],
+            "journal_number": 1,
+            "posting_date": kwargs.get("posting_date", "2026-08-01"),
+            "lines": kwargs.get("lines", []),
+        }
+        journal_container.create_item(entry)
+        return entry
+    
+    def mock_list_entries(farm_id, **kwargs):
+        return [
+            item for item in journal_container.items.values()
+            if item.get("farm_id") == farm_id and item.get("type") == "journal_entry"
+        ]
+    
+    monkeypatch.setattr(accounting.journal_service, "post_entry", mock_post_entry)
+    monkeypatch.setattr(accounting.journal_service, "list_entries", mock_list_entries)
     monkeypatch.setattr(accounting.ocr_service, "extract_text", lambda **_: OCRResult("Diesel 100,00", "fake-ocr", 0.9, []))
     monkeypatch.setattr(
         accounting.ocr_service,
