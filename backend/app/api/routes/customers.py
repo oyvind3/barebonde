@@ -55,7 +55,7 @@ def validate_email(value: Optional[str]) -> str:
 
 class CustomerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
-    org_number: Optional[str] = Field(default=None, pattern=r"^\d{9}$")
+    org_number: Optional[str] = Field(default=None)
     email: Optional[str] = Field(default=None, max_length=254)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
@@ -66,7 +66,7 @@ class CustomerCreate(BaseModel):
 
 class CustomerPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=160)
-    org_number: Optional[str] = Field(default=None, pattern=r"^\d{9}$")
+    org_number: Optional[str] = Field(default=None)
     email: Optional[str] = Field(default=None, max_length=254)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
@@ -161,8 +161,14 @@ def create_customer(
     if not name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kunden må ha et navn.")
 
-    # org_number is already validated by Pydantic pattern, just normalize whitespace
-    org_number = (request.org_number or "").strip() or ""
+    # Normalize and validate org_number
+    org_number_raw = (request.org_number or "").strip()
+    if org_number_raw and not ORG_NUMBER_PATTERN.match(org_number_raw):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Organisasjonsnummer må bestå av nøyaktig 9 sifre.",
+        )
+    org_number = org_number_raw or ""
     email = validate_email(request.email)
 
     if org_number:
@@ -224,8 +230,14 @@ def patch_customer(
     updates = request.model_dump(exclude_unset=True)
 
     if "org_number" in updates:
-        # org_number is already validated by Pydantic pattern, just normalize whitespace
-        new_org = (updates["org_number"] or "").strip() or ""
+        # Normalize and validate org_number
+        new_org_raw = (updates["org_number"] or "").strip()
+        if new_org_raw and not ORG_NUMBER_PATTERN.match(new_org_raw):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Organisasjonsnummer må bestå av nøyaktig 9 sifre.",
+            )
+        new_org = new_org_raw or ""
         if new_org and new_org != (document.get("org_number") or ""):
             existing = _find_by_org_number(farm_id, new_org)
             if existing and existing.get("id") != customer_id:
