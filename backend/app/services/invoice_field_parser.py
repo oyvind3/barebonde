@@ -1,13 +1,21 @@
 """Deterministic invoice field extraction service.
 
 This module extracts structured fields from OCR text without using generative AI.
-It supports Norwegian formats and prioritizes amounts linked to explicit total labels.
+It supports Norwegian formats and prioritizes label-context over random regex matches.
+
+Scoring principles:
+- Explicit label match (same line): high confidence
+- Label on previous line, value on next: medium-high confidence
+- Distance from label reduces confidence
+- Valid format / checksum increases confidence
+- Conflicts between fields reduce confidence and add warnings
+- Mathematical consistency (excl + vat = total) is cross-checked
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
@@ -21,73 +29,140 @@ class FieldCandidate:
     source: str  # "ocr", "inferred", "fallback"
     needs_review: bool = True
     label_context: Optional[str] = None
+    warnings: list[str] = field(default_factory=list)
+
+
+# --- Label pattern definitions ---
+# Each entry: (compiled_regex, base_confidence, label_name)
+# Patterns are matched case-insensitively against individual lines.
+
+_ORG_LABEL_PATTERNS = [
+    (re.compile(r"org\.?\s*nr\.?\s*[:\-]?\s*$", re.I), 0.92, "org.nr"),
+    (re.compile(r"organisasjonsnummer\s*[:\-]?\s*$", re.I), 0.92, "organisasjonsnummer"),
+    (re.compile(r"foretaksnummer\s*[:\-]?\s*$", re.I), 0.90, "foretaksnummer"),
+]
+
+_ORG_INLINE_PATTERNS = [
+    # "Org.nr: 123 456 789" or "Org.nr 123456789"
+    (re.compile(r"org\.?\s*nr\.?\s*[:\-]?\s*(\d[\d\s]{7,12}\d)", re.I), 0.92, "org.nr"),
+    (re.compile(r"organisasjonsnummer\s*[:\-]?\s*(\d[\d\s]{7,12}\d)", re.I), 0.92, "organisasjonsnummer"),
+    # "NO 123 456 789 MVA" or "NO123456789MVA"
+    (re.compile(r"\bNO\s*(\d[\d\s]{7,12}\d)\s*MVA\b", re.I), 0.93, "NO...MVA"),
+]
+
+_INVOICE_NUMBER_LABELS = [
+    (re.compile(r"faktura\s*nr\.?\s*[:\-]?\s*$", re.I), 0.90, "fakturanr"),
+    (re.compile(r"fakturanummer\s*[:\-]?\s*$", re.I), 0.90, "fakturanummer"),
+    (re.compile(r"invoice\s*no\.?\s*[:\-]?\s*$", re.I), 0.88, "invoice no"),
+    (re.compile(r"faktura\s*id\s*[:\-]?\s*$", re.I), 0.80, "faktura id"),
+]
+
+_INVOICE_NUMBER_INLINE = [
+    (re.compile(r"faktura\s*nr\.?\s*[:\-]?\s*([A-Za-z0-9\-/]+)", re.I), 0.90, "fakturanr"),
+    (re.compile(r"fakturanummer\s*[:\-]?\s*([A-Za-z0-9\-/]+)", re.I), 0.90, "fakturanummer"),
+    (re.compile(r"invoice\s*no\.?\s*[:\-]?\s*([A-Za-z0-9\-/]+)", re.I), 0.88, "invoice no"),
+]
+
+_INVOICE_DATE_LABELS = [
+    (re.compile(r"faktura\s*dato\s*[:\-]?\s*$", re.I), 0.90, "fakturadato"),
+    (re.compile(r"fakturadato\s*[:\-]?\s*$", re.I), 0.90, "fakturadato"),
+    (re.compile(r"invoice\s*date\s*[:\-]?\s*$", re.I), 0.88, "invoice date"),
+    (re.compile(r"utstedt\s*[:\-]?\s*$", re.I), 0.80, "utstedt"),
+]
+
+_INVOICE_DATE_INLINE = [
+    (re.compile(r"faktura\s*dato\s*[:\-]?\s*(\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2})", re.I), 0.90, "fakturadato"),
+    (re.compile(r"fakturadato\s*[:\-]?\s*(\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2})", re.I), 0.90, "fakturadato"),
+    (re.compile(r"invoice\s*date\s*[:\-]?\s*(\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2})", re.I), 0.88, "invoice date"),
+]
+
+_DUE_DATE_LABELS = [
+    (re.compile(r"forfalls\s*dato\s*[:\-]?\s*$", re.I), 0.90, "forfallsdato"),
+    (re.compile(r"forfallsdato\s*[:\-]?\s*$", re.I), 0.90, "forfallsdato"),
+    (re.compile(r"forfall\s*[:\-]?\s*$", re.I), 0.88, "forfall"),
+    (re.compile(r"betalingsfrist\s*[:\-]?\s*$", re.I), 0.88, "betalingsfrist"),
+    (re.compile(r"due\s*date\s*[:\-]?\s*$", re.I), 0.85, "due date"),
+]
+
+_DUE_DATE_INLINE = [
+    (re.compile(r"forfalls\s*dato\s*[:\-]?\s*(\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2})", re.I), 0.90, "forfallsdato"),
+    (re.compile(r"forfallsdato\s*[:\-]?\s*(\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2})", re.I), 0.90, "forfallsdato"),
+    (re.compile(r"forfall\s*[:\-]?\s*(\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2})", re.I), 0.88, "forfall"),
+    (re.compile(r"betalingsfrist\s*[:\-]?\s*(\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2})", re.I), 0.88, "betalingsfrist"),
+]
+
+_TOTAL_LABELS = [
+    (re.compile(r"(?:beløp\s+)?å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "å betale"),
+    (re.compile(r"beløp\s+å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "beløp å betale"),
+    (re.compile(r"sum\s+å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "sum å betale"),
+    (re.compile(r"total(?:t)?\s*(?:inkl\.?\s*mva\.?)?\s*[:\-]?\s*$", re.I), 0.90, "total"),
+    (re.compile(r"sum\s+inkl\.?\s*mva\.?\s*[:\-]?\s*$", re.I), 0.92, "sum inkl. mva"),
+    (re.compile(r"å\s+betale\s*[:\-]?\s*$", re.I), 0.95, "å betale"),
+]
+
+_TOTAL_INLINE = [
+    (re.compile(r"(?:beløp\s+)?å\s+betale\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.95, "å betale"),
+    (re.compile(r"total(?:t)?\s*(?:inkl\.?\s*mva\.?)?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.90, "total"),
+    (re.compile(r"sum\s+inkl\.?\s*mva\.?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.92, "sum inkl. mva"),
+]
+
+_EXCL_VAT_LABELS = [
+    (re.compile(r"(?:sum\s+)?eks\.?\s*mva\.?\s*[:\-]?\s*$", re.I), 0.90, "eks. mva"),
+    (re.compile(r"netto\s*[:\-]?\s*$", re.I), 0.85, "netto"),
+    (re.compile(r"subtotal\s*[:\-]?\s*$", re.I), 0.82, "subtotal"),
+    (re.compile(r"sum\s+eks\.?\s*merverdiavgift\s*[:\-]?\s*$", re.I), 0.90, "eks. mva"),
+]
+
+_EXCL_VAT_INLINE = [
+    (re.compile(r"(?:sum\s+)?eks\.?\s*mva\.?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.90, "eks. mva"),
+    (re.compile(r"netto\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.85, "netto"),
+]
+
+_VAT_LABELS = [
+    (re.compile(r"(?:herav\s+)?mva(?:\.?\s*beløp)?\s*[:\-]?\s*$", re.I), 0.90, "mva"),
+    (re.compile(r"mva\s*\d+\s*%\s*[:\-]?\s*$", re.I), 0.88, "mva %"),
+    (re.compile(r"merverdiavgift\s*[:\-]?\s*$", re.I), 0.88, "merverdiavgift"),
+]
+
+_VAT_INLINE = [
+    (re.compile(r"(?:herav\s+)?mva(?:\.?\s*beløp)?\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.90, "mva"),
+    (re.compile(r"merverdiavgift\s*[:\-]?\s*(?:NOK|kr\.?)?\s*([\d][\d\s.,]*)", re.I), 0.88, "merverdiavgift"),
+]
+
+_KID_LABELS = [
+    (re.compile(r"KID(?:\s*-?\s*nr\.?)?\s*[:\-]?\s*$", re.I), 0.92, "KID"),
+    (re.compile(r"betalingsreferanse\s*[:\-]?\s*$", re.I), 0.85, "betalingsreferanse"),
+    (re.compile(r"OCR\s*-?\s*KID\s*[:\-]?\s*$", re.I), 0.90, "OCR KID"),
+]
+
+_KID_INLINE = [
+    (re.compile(r"KID(?:\s*-?\s*nr\.?)?\s*[:\-]?\s*([\d][\d\s]{3,26})", re.I), 0.92, "KID"),
+    (re.compile(r"betalingsreferanse\s*[:\-]?\s*([\d][\d\s]{3,26})", re.I), 0.85, "betalingsreferanse"),
+]
+
+_BANK_LABELS = [
+    (re.compile(r"bank\s*konto(?:\s*nr\.?)?\s*[:\-]?\s*$", re.I), 0.90, "bankkonto"),
+    (re.compile(r"kontonummer\s*[:\-]?\s*$", re.I), 0.90, "kontonummer"),
+    (re.compile(r"konto\s*nr\.?\s*[:\-]?\s*$", re.I), 0.85, "konto nr"),
+    (re.compile(r"giro\s*konto\s*[:\-]?\s*$", re.I), 0.85, "girokonto"),
+]
+
+_BANK_INLINE = [
+    (re.compile(r"bank\s*konto(?:\s*nr\.?)?\s*[:\-]?\s*(\d{4}[.\s]?\d{2}[.\s]?\d{5})", re.I), 0.90, "bankkonto"),
+    (re.compile(r"kontonummer\s*[:\-]?\s*(\d{4}[.\s]?\d{2}[.\s]?\d{5})", re.I), 0.90, "kontonummer"),
+]
+
+_DATE_RE = re.compile(r"\d{2}[./\-]\d{2}[./\-]\d{2,4}|\d{4}-\d{2}-\d{2}")
+_AMOUNT_RE = re.compile(r"[\d][\d\s.,]*[\d]|[\d]")
+_ORG_RE = re.compile(r"\d[\d\s]{7,12}\d")
 
 
 class InvoiceFieldParser:
-    """Extract invoice fields from OCR text using deterministic rules."""
+    """Extract invoice fields from OCR text using deterministic rules with candidate scoring."""
 
-    # Norwegian keywords for totals
-    TOTAL_KEYWORDS = [
-        r"å betale",
-        r"aa betale",
-        r"til betaling",
-        r"totalt",
-        r"total",
-        r"sum inkl.? mva",
-        r"sum inkl.?",
-        r"beløp å betale",
-        r"belop a betale",
-        r"forfaller",
-        r"betaling",
-        r" Netto",
-        r" Totalt",
-        r" TOTAL",
-        r" SUM",
-    ]
-
-    VAT_KEYWORDS = [
-        r"mva",
-        r"merverdiavgift",
-        r"merkesalgsavgift",
-        r"vg",
-        r"MVA",
-        r"MOMS",
-    ]
-
-    DATE_KEYWORDS = [
-        r"fakturadato",
-        r"faktura dato",
-        r"dato",
-        r"utstedt",
-        r"forfallsdato",
-        r"forfall",
-        r"kjøpsdato",
-    ]
-
-    INVOICE_NUMBER_KEYWORDS = [
-        r"fakturanr",
-        r"fakturanummer",
-        r"faktura ?nr\.?",
-        r"invoice ?no\.?",
-        r"referanse",
-        r"ordrenr",
-        r"ordre ?nr\.?",
-    ]
-
-    ORG_NUMBER_PATTERNS = [
-        r"(?:org\.?\s*nr\.?|organisasjonsnummer|foretaksnummer)[\s:]*([0-9]{9})",
-        r"(?:Org\.?\s*Nr\.?|Organisasjonsnummer)[\s:]*([0-9]{9})",
-    ]
-
-    KID_PATTERNS = [
-        r"(?:KID|Kid|kid)[\s:]*([0-9\s]+)",
-        r"(?:Referanse|Payment reference)[\s:]*([0-9\s]+)",
-    ]
-
-    BANK_ACCOUNT_PATTERNS = [
-        r"(?:Bankkonto|Kontonummer|Account number|IBAN)[\s:]*([A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:\d{0,7})?)",
-        r"(?:Bankkonto|Kontonr\.?)[\s:]*([0-9]{4}\.?[0-9]{2}\.?[0-9]{5})",
-    ]
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def parse_fields(self, text: str) -> dict[str, Any]:
         """Parse all invoice fields from OCR text.
@@ -96,35 +171,124 @@ class InvoiceFieldParser:
         """
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         normalized = "\n".join(lines)
+        warnings: list[str] = []
+
+        supplier_name = self._extract_supplier_name(lines)
+        org_number = self._extract_org_number(lines, normalized)
+        invoice_number = self._extract_invoice_number(lines)
+        invoice_date = self._extract_invoice_date(lines)
+        due_date = self._extract_due_date(lines)
+        amount_total = self._extract_total_amount(lines)
+        amount_excl_vat = self._extract_amount_excl_vat(lines)
+        amount_vat = self._extract_vat_amount(lines)
+        currency = self._extract_currency(normalized)
+        kid = self._extract_kid(lines)
+        bank_account = self._extract_bank_account(lines)
+        description = self._extract_description(lines)
+
+        # --- Cross-checks ---
+        self._cross_check_amounts(amount_total, amount_excl_vat, amount_vat, warnings)
+        self._cross_check_dates(invoice_date, due_date, warnings)
 
         return {
-            "supplier_name": self._extract_supplier_name(lines),
-            "org_number": self._extract_org_number(normalized),
-            "invoice_number": self._extract_invoice_number(lines),
-            "invoice_date": self._extract_invoice_date(normalized),
-            "due_date": self._extract_due_date(normalized),
-            "amount_total": self._extract_total_amount(normalized),
-            "amount_vat": self._extract_vat_amount(normalized),
-            "amount_excl_vat": self._extract_amount_excl_vat(normalized),
-            "currency": self._extract_currency(normalized),
-            "kid": self._extract_kid(normalized),
-            "bank_account": self._extract_bank_account(normalized),
-            "description": self._extract_description(lines),
+            "supplier_name": supplier_name,
+            "org_number": org_number,
+            "invoice_number": invoice_number,
+            "invoice_date": invoice_date,
+            "due_date": due_date,
+            "amount_total": amount_total,
+            "amount_vat": amount_vat,
+            "amount_excl_vat": amount_excl_vat,
+            "currency": currency,
+            "kid": kid,
+            "bank_account": bank_account,
+            "description": description,
             "text_preview": normalized[:1200],
+            "warnings": warnings,
         }
+
+    # ------------------------------------------------------------------
+    # Line-based extraction helpers
+    # ------------------------------------------------------------------
+
+    def _find_labeled_value(
+        self,
+        lines: list[str],
+        label_patterns: list[tuple[re.Pattern, float, str]],
+        inline_patterns: list[tuple[re.Pattern, float, str]],
+        value_regex: re.Pattern,
+        max_distance: int = 2,
+    ) -> Optional[FieldCandidate]:
+        """Generic label-context extraction.
+
+        1. Try inline patterns (label + value on same line).
+        2. Try label-only patterns: if a line matches a label, look at the
+           same line remainder and the next `max_distance` lines for a value.
+        """
+        # Pass 1: inline patterns
+        for line in lines:
+            for pattern, base_conf, label_name in inline_patterns:
+                match = pattern.search(line)
+                if match:
+                    value = match.group(1).strip()
+                    if value:
+                        return FieldCandidate(
+                            value=value,
+                            confidence=base_conf,
+                            source="ocr",
+                            needs_review=base_conf < 0.85,
+                            label_context=label_name,
+                        )
+
+        # Pass 2: label on its own line, value on same/next line(s)
+        for idx, line in enumerate(lines):
+            for pattern, base_conf, label_name in label_patterns:
+                if pattern.search(line):
+                    # Check remainder of same line after label
+                    remainder = pattern.sub("", line).strip()
+                    val_match = value_regex.search(remainder)
+                    if val_match:
+                        return FieldCandidate(
+                            value=val_match.group(0).strip(),
+                            confidence=base_conf,
+                            source="ocr",
+                            needs_review=base_conf < 0.85,
+                            label_context=label_name,
+                        )
+                    # Check next lines with distance penalty
+                    for offset in range(1, max_distance + 1):
+                        if idx + offset >= len(lines):
+                            break
+                        next_line = lines[idx + offset]
+                        val_match = value_regex.search(next_line)
+                        if val_match:
+                            distance_penalty = 0.05 * offset
+                            conf = max(0.3, base_conf - distance_penalty)
+                            return FieldCandidate(
+                                value=val_match.group(0).strip(),
+                                confidence=conf,
+                                source="ocr",
+                                needs_review=conf < 0.80,
+                                label_context=label_name,
+                            )
+        return None
+
+    # ------------------------------------------------------------------
+    # Field extractors
+    # ------------------------------------------------------------------
 
     def _extract_supplier_name(self, lines: list[str]) -> Optional[FieldCandidate]:
         """Extract supplier name from the first few lines."""
-        for line in lines[:10]:
+        skip_re = re.compile(
+            r"org\.nr|organisasjonsnummer|faktura|dato|sum|mva|total|kunde|kundeservice|"
+            r"telefon|e-post|www\.|side|page|fakturanr|kontonummer|bankkonto|kid|forfall",
+            re.IGNORECASE,
+        )
+        for line in lines[:12]:
             cleaned = re.sub(r"\s+", " ", line).strip()
             if len(cleaned) < 3:
                 continue
-            # Skip lines that look like headers or metadata
-            if re.search(
-                r"org\.nr|faktura|dato|sum|mva|total|kunde|kundeservice|telefon|e-post|www\.",
-                cleaned,
-                flags=re.IGNORECASE,
-            ):
+            if skip_re.search(cleaned):
                 continue
             # Must contain at least one letter
             if any(ch.isalpha() for ch in cleaned):
@@ -136,25 +300,29 @@ class InvoiceFieldParser:
                 )
         return None
 
-    def _extract_org_number(self, text: str) -> Optional[FieldCandidate]:
+    def _extract_org_number(self, lines: list[str], text: str) -> Optional[FieldCandidate]:
         """Extract Norwegian organization number (9 digits)."""
-        for pattern in self.ORG_NUMBER_PATTERNS:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                org_nr = match.group(1).replace(" ", "")
-                if len(org_nr) == 9:
-                    return FieldCandidate(
-                        value=org_nr,
-                        confidence=0.85,
-                        source="ocr",
-                        needs_review=False,
-                        label_context="org.nr",
-                    )
-        # Fallback: look for standalone 9-digit numbers near "org" context
+        # Try labeled extraction first
+        candidate = self._find_labeled_value(
+            lines, _ORG_LABEL_PATTERNS, _ORG_INLINE_PATTERNS, _ORG_RE
+        )
+        if candidate:
+            digits = re.sub(r"\s", "", candidate.value)
+            # Handle "NO xxx xxx xxx MVA" – strip non-digits
+            digits = re.sub(r"[^0-9]", "", digits)
+            if len(digits) == 9 and self._validate_org_number(digits):
+                candidate.value = digits
+                return candidate
+            # If labeled but invalid, reduce confidence
+            candidate.confidence = max(0.3, candidate.confidence - 0.3)
+            candidate.needs_review = True
+            candidate.warnings.append("Ugyldig organisasjonsnummer")
+            return candidate
+
+        # Fallback: standalone 9-digit numbers
         standalone_pattern = r"\b(\d{9})\b"
         matches = re.findall(standalone_pattern, text)
         for match in matches:
-            # Validate with checksum (simplified)
             if self._validate_org_number(match):
                 return FieldCandidate(
                     value=match,
@@ -165,73 +333,332 @@ class InvoiceFieldParser:
         return None
 
     def _validate_org_number(self, org_nr: str) -> bool:
-        """Validate Norwegian organization number checksum (simplified)."""
+        """Validate Norwegian organization number (MOD 11 checksum)."""
         if len(org_nr) != 9 or not org_nr.isdigit():
             return False
-        # Simplified validation - just check it's not all zeros or obvious patterns
         if org_nr == "000000000" or org_nr == "123456789":
             return False
-        return True
+        # MOD 11 checksum with weights [3,2,7,6,5,4,3,2]
+        weights = [3, 2, 7, 6, 5, 4, 3, 2]
+        total = sum(int(org_nr[i]) * weights[i] for i in range(8))
+        remainder = total % 11
+        check = 0 if remainder == 0 else 11 - remainder
+        if check == 10:
+            return False  # Invalid per MOD 11
+        return check == int(org_nr[8])
 
     def _extract_invoice_number(self, lines: list[str]) -> Optional[FieldCandidate]:
         """Extract invoice number."""
-        text = "\n".join(lines)
-        for keyword in self.INVOICE_NUMBER_KEYWORDS:
-            pattern = rf"{keyword}[\s:.]*([A-Za-z0-9\-]+)"
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                value = match.group(1).strip()
-                if value and len(value) <= 30:
-                    return FieldCandidate(
-                        value=value,
-                        confidence=0.8,
-                        source="ocr",
-                        needs_review=False,
-                        label_context="fakturanr",
-                    )
-        return None
+        value_re = re.compile(r"[A-Za-z0-9\-/]{2,30}")
+        candidate = self._find_labeled_value(
+            lines, _INVOICE_NUMBER_LABELS, _INVOICE_NUMBER_INLINE, value_re
+        )
+        if candidate:
+            # Clean up trailing punctuation
+            candidate.value = candidate.value.strip("./-")
+            if len(candidate.value) < 2:
+                return None
+        return candidate
 
-    def _extract_invoice_date(self, text: str) -> Optional[FieldCandidate]:
+    def _extract_invoice_date(self, lines: list[str]) -> Optional[FieldCandidate]:
         """Extract invoice date."""
-        # Look for explicit invoice date labels first
-        for keyword in self.DATE_KEYWORDS:
-            if "forfall" in keyword.lower():
-                continue  # Skip due date keywords here
-            pattern = rf"{keyword}[\s:.]*(\d{{2}}[.\-/]\d{{2}}[.\-/]\d{{2,4}}|\d{{4}}[\-]\d{{2}}[\-]\d{{2}})"
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                date_str = match.group(1)
-                parsed = self._parse_date(date_str)
-                if parsed:
-                    return FieldCandidate(
-                        value=parsed.isoformat(),
-                        confidence=0.85,
-                        source="ocr",
-                        needs_review=False,
-                        label_context="fakturadato",
-                    )
+        candidate = self._find_labeled_value(
+            lines, _INVOICE_DATE_LABELS, _INVOICE_DATE_INLINE, _DATE_RE
+        )
+        if candidate:
+            parsed = self._parse_date(candidate.value)
+            if parsed:
+                candidate.value = parsed.strftime("%Y-%m-%d")
+                return candidate
+            candidate.confidence = max(0.3, candidate.confidence - 0.3)
+            candidate.needs_review = True
+            candidate.warnings.append("Kunne ikke tolke datoformat")
+            return candidate
 
         # Fallback: find any date in the text
-        return self._find_any_date(text)
+        return self._find_any_date("\n".join(lines))
 
-    def _extract_due_date(self, text: str) -> Optional[FieldCandidate]:
+    def _extract_due_date(self, lines: list[str]) -> Optional[FieldCandidate]:
         """Extract due date (forfallsdato)."""
-        due_keywords = [r"forfallsdato", r"forfall", r"forfaller", r"betalingsfrist"]
-        for keyword in due_keywords:
-            pattern = rf"{keyword}[\s:.]*(\d{{2}}[.\-/]\d{{2}}[.\-/]\d{{2,4}}|\d{{4}}[\-]\d{{2}}[\-]\d{{2}})"
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                date_str = match.group(1)
-                parsed = self._parse_date(date_str)
-                if parsed:
-                    return FieldCandidate(
-                        value=parsed.isoformat(),
-                        confidence=0.85,
-                        source="ocr",
-                        needs_review=False,
-                        label_context="forfallsdato",
-                    )
+        candidate = self._find_labeled_value(
+            lines, _DUE_DATE_LABELS, _DUE_DATE_INLINE, _DATE_RE
+        )
+        if candidate:
+            parsed = self._parse_date(candidate.value)
+            if parsed:
+                candidate.value = parsed.strftime("%Y-%m-%d")
+                return candidate
+            candidate.confidence = max(0.3, candidate.confidence - 0.3)
+            candidate.needs_review = True
+            candidate.warnings.append("Kunne ikke tolke datoformat")
+        return candidate
+
+    def _extract_total_amount(self, lines: list[str]) -> Optional[FieldCandidate]:
+        """Extract total amount including VAT.
+
+        Prioritizes amounts linked to explicit total/payment labels.
+        """
+        candidates: list[tuple[float, float, str]] = []
+
+        # Pass 1: inline label patterns
+        for line in lines:
+            for pattern, base_conf, label_name in _TOTAL_INLINE:
+                match = pattern.search(line)
+                if match:
+                    parsed = self._parse_amount(match.group(1))
+                    if parsed is not None and parsed > 0:
+                        candidates.append((parsed, base_conf, label_name))
+
+        # Pass 2: label on own line, amount on same/next line
+        for idx, line in enumerate(lines):
+            for pattern, base_conf, label_name in _TOTAL_LABELS:
+                if pattern.search(line):
+                    # Same line remainder
+                    remainder = pattern.sub("", line).strip()
+                    amt_match = _AMOUNT_RE.search(remainder)
+                    if amt_match:
+                        parsed = self._parse_amount(amt_match.group(0))
+                        if parsed is not None and parsed > 0:
+                            candidates.append((parsed, base_conf, label_name))
+                            continue
+                    # Next lines
+                    for offset in range(1, 3):
+                        if idx + offset >= len(lines):
+                            break
+                        next_line = lines[idx + offset]
+                        amt_match = _AMOUNT_RE.search(next_line)
+                        if amt_match:
+                            parsed = self._parse_amount(amt_match.group(0))
+                            if parsed is not None and parsed > 0:
+                                penalty = 0.05 * offset
+                                candidates.append((parsed, max(0.4, base_conf - penalty), label_name))
+                                break
+
+        if not candidates:
+            # Last resort: find all amounts
+            text = "\n".join(lines)
+            all_amounts = self._find_all_amounts(text)
+            for amount in all_amounts[:3]:
+                candidates.append((amount, 0.2, ""))
+
+        if not candidates:
+            return None
+
+        # Sort by confidence first, then by amount
+        candidates.sort(key=lambda x: (-x[1], -x[0]))
+        best = candidates[0]
+        return FieldCandidate(
+            value=str(best[0]),
+            confidence=best[1],
+            source="ocr" if best[1] > 0.5 else "inferred",
+            needs_review=best[1] < 0.7,
+            label_context=best[2] if best[2] else None,
+        )
+
+    def _extract_amount_excl_vat(self, lines: list[str]) -> Optional[FieldCandidate]:
+        """Extract amount excluding VAT."""
+        candidate = self._find_labeled_value(
+            lines, _EXCL_VAT_LABELS, _EXCL_VAT_INLINE, _AMOUNT_RE
+        )
+        if candidate:
+            parsed = self._parse_amount(candidate.value)
+            if parsed is not None and parsed > 0:
+                candidate.value = str(parsed)
+                return candidate
         return None
+
+    def _extract_vat_amount(self, lines: list[str]) -> Optional[FieldCandidate]:
+        """Extract VAT amount."""
+        candidate = self._find_labeled_value(
+            lines, _VAT_LABELS, _VAT_INLINE, _AMOUNT_RE
+        )
+        if candidate:
+            parsed = self._parse_amount(candidate.value)
+            if parsed is not None and parsed > 0:
+                candidate.value = str(parsed)
+                return candidate
+        return None
+
+    def _extract_currency(self, text: str) -> Optional[FieldCandidate]:
+        """Extract currency code."""
+        currency_patterns = [
+            (re.compile(r"\b(NOK|nok)\b"), "NOK", 0.9),
+            (re.compile(r"\b(EUR|Euro|EURO)\b", re.I), "EUR", 0.8),
+            (re.compile(r"\b(USD|Dollar)\b", re.I), "USD", 0.8),
+            (re.compile(r"\b(SEK)\b"), "SEK", 0.8),
+            (re.compile(r"\b(DKK)\b"), "DKK", 0.8),
+            (re.compile(r"\bkr\b", re.I), "NOK", 0.7),
+        ]
+        for pattern, currency, conf in currency_patterns:
+            if pattern.search(text):
+                return FieldCandidate(
+                    value=currency,
+                    confidence=conf,
+                    source="ocr",
+                    needs_review=conf < 0.85,
+                )
+        # Default to NOK
+        return FieldCandidate(
+            value="NOK",
+            confidence=0.5,
+            source="fallback",
+            needs_review=False,
+        )
+
+    def _extract_kid(self, lines: list[str]) -> Optional[FieldCandidate]:
+        """Extract KID (payment reference) number."""
+        candidate = self._find_labeled_value(
+            lines, _KID_LABELS, _KID_INLINE, re.compile(r"[\d][\d\s]{3,26}")
+        )
+        if candidate:
+            kid = re.sub(r"\s", "", candidate.value)
+            if 5 <= len(kid) <= 25 and kid.isdigit():
+                candidate.value = kid
+                # Validate MOD 10 or MOD 11 checksum if length is appropriate
+                if self._validate_kid_mod10(kid) or self._validate_kid_mod11(kid):
+                    candidate.confidence = min(1.0, candidate.confidence + 0.05)
+                    candidate.needs_review = False
+                else:
+                    # Checksum invalid – reduce confidence but keep as suggestion
+                    candidate.confidence = max(0.4, candidate.confidence - 0.2)
+                    candidate.needs_review = True
+                    candidate.warnings.append("KID-kontrollsiffer stemmer ikke")
+                return candidate
+            # Invalid format
+            candidate.confidence = max(0.3, candidate.confidence - 0.3)
+            candidate.needs_review = True
+        return candidate
+
+    def _validate_kid_mod10(self, kid: str) -> bool:
+        """Validate KID using MOD 10 (Luhn) checksum."""
+        if len(kid) < 2:
+            return False
+        try:
+            digits = [int(d) for d in kid]
+            # Luhn: double every second digit from right
+            total = 0
+            for i, d in enumerate(reversed(digits[:-1])):
+                if i % 2 == 0:
+                    d *= 2
+                    if d > 9:
+                        d -= 9
+                total += d
+            check = (10 - (total % 10)) % 10
+            return check == digits[-1]
+        except (ValueError, IndexError):
+            return False
+
+    def _validate_kid_mod11(self, kid: str) -> bool:
+        """Validate KID using MOD 11 checksum."""
+        if len(kid) < 2:
+            return False
+        try:
+            digits = [int(d) for d in kid]
+            weights = [2, 3, 4, 5, 6, 7]
+            total = 0
+            for i, d in enumerate(reversed(digits[:-1])):
+                total += d * weights[i % len(weights)]
+            remainder = total % 11
+            check = 0 if remainder == 0 else 11 - remainder
+            if check == 10:
+                return False
+            return check == digits[-1]
+        except (ValueError, IndexError):
+            return False
+
+    def _extract_bank_account(self, lines: list[str]) -> Optional[FieldCandidate]:
+        """Extract bank account number (Norwegian format: XXXX.XX.XXXXX)."""
+        bank_re = re.compile(r"\d{4}[.\s]?\d{2}[.\s]?\d{5}")
+        candidate = self._find_labeled_value(
+            lines, _BANK_LABELS, _BANK_INLINE, bank_re
+        )
+        if candidate:
+            # Normalize: remove spaces and dots for storage, but keep original format for display
+            digits = re.sub(r"[.\s]", "", candidate.value)
+            if len(digits) == 11 and digits.isdigit():
+                # Store in standard format XXXX.XX.XXXXX
+                candidate.value = f"{digits[:4]}.{digits[4:6]}.{digits[6:]}"
+                return candidate
+            candidate.confidence = max(0.3, candidate.confidence - 0.3)
+            candidate.needs_review = True
+        return candidate
+
+    def _extract_description(self, lines: list[str]) -> Optional[FieldCandidate]:
+        """Extract a short description from the document."""
+        supplier = self._extract_supplier_name(lines)
+        if supplier:
+            return FieldCandidate(
+                value=supplier.value,
+                confidence=supplier.confidence * 0.8,
+                source=supplier.source,
+                needs_review=True,
+            )
+        return None
+
+    # ------------------------------------------------------------------
+    # Cross-checks
+    # ------------------------------------------------------------------
+
+    def _cross_check_amounts(
+        self,
+        total: Optional[FieldCandidate],
+        excl: Optional[FieldCandidate],
+        vat: Optional[FieldCandidate],
+        warnings: list[str],
+    ) -> None:
+        """Cross-check amount consistency: excl + vat ≈ total."""
+        if not total or not excl or not vat:
+            return
+        try:
+            total_val = float(total.value)
+            excl_val = float(excl.value)
+            vat_val = float(vat.value)
+        except (ValueError, TypeError):
+            return
+
+        computed = excl_val + vat_val
+        tolerance = max(0.5, total_val * 0.01)  # 1% or 0.50 tolerance
+
+        if abs(computed - total_val) > tolerance:
+            warnings.append(
+                f"Beløp stemmer ikke: eks. MVA ({excl_val:.2f}) + MVA ({vat_val:.2f}) "
+                f"= {computed:.2f}, men total er {total_val:.2f}"
+            )
+            # Reduce confidence on all three
+            total.confidence = max(0.3, total.confidence - 0.2)
+            total.needs_review = True
+            excl.confidence = max(0.3, excl.confidence - 0.2)
+            excl.needs_review = True
+            vat.confidence = max(0.3, vat.confidence - 0.2)
+            vat.needs_review = True
+
+    def _cross_check_dates(
+        self,
+        invoice_date: Optional[FieldCandidate],
+        due_date: Optional[FieldCandidate],
+        warnings: list[str],
+    ) -> None:
+        """Cross-check: invoice_date <= due_date."""
+        if not invoice_date or not due_date:
+            return
+        try:
+            inv = datetime.strptime(invoice_date.value, "%Y-%m-%d")
+            due = datetime.strptime(due_date.value, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return
+
+        if inv > due:
+            warnings.append(
+                f"Fakturadato ({invoice_date.value}) er etter forfallsdato ({due_date.value})"
+            )
+            invoice_date.confidence = max(0.3, invoice_date.confidence - 0.2)
+            invoice_date.needs_review = True
+            due_date.confidence = max(0.3, due_date.confidence - 0.2)
+            due_date.needs_review = True
+
+    # ------------------------------------------------------------------
+    # Utility
+    # ------------------------------------------------------------------
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """Parse date string in various Norwegian formats."""
@@ -265,186 +692,11 @@ class InvoiceFieldParser:
                 parsed = self._parse_date(date_str)
                 if parsed:
                     return FieldCandidate(
-                        value=parsed.isoformat(),
+                        value=parsed.strftime("%Y-%m-%d"),
                         confidence=0.5,
                         source="inferred",
                         needs_review=True,
                     )
-        return None
-
-    def _extract_total_amount(self, text: str) -> Optional[FieldCandidate]:
-        """Extract total amount including VAT.
-
-        Prioritizes amounts linked to explicit total/ payment labels.
-        Does NOT simply pick the largest amount.
-        """
-        candidates: list[tuple[float, float, str]] = []  # (amount, confidence, context)
-
-        # Look for amounts near total keywords
-        for keyword in self.TOTAL_KEYWORDS:
-            # Match patterns like "Total: 1 234,56" or "Sum kr 500"
-            pattern = rf"{keyword}[\s:.]*NOK[\s]*([0-9][0-9\s.,]*)|{keyword}[\s:.]*kr[\s]*([0-9][0-9\s.,]*)|{keyword}[\s:.]*([0-9][0-9\s.,]*)"
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                # Get the matched group that contains the number
-                value = match.group(1) or match.group(2) or match.group(3) or ""
-                if value:
-                    parsed = self._parse_amount(value.strip())
-                    if parsed is not None and parsed > 0:
-                        context = match.group(0)[:50]
-                        candidates.append((parsed, 0.9, context))
-
-        # Also look for amounts on lines containing "kr" or currency markers
-        lines = text.split("\n")
-        for line in lines:
-            if re.search(r"kr\s*[0-9]", line, re.IGNORECASE):
-                amount_match = re.search(r"kr\s*([0-9][0-9\s.,]*)", line, re.IGNORECASE)
-                if amount_match:
-                    parsed = self._parse_amount(amount_match.group(1))
-                    if parsed is not None and parsed > 0:
-                        # Lower confidence for unlabeled amounts
-                        candidates.append((parsed, 0.4, line[:50]))
-
-        if not candidates:
-            # Last resort: find all amounts in text
-            all_amounts = self._find_all_amounts(text)
-            for amount in all_amounts[:3]:
-                candidates.append((amount, 0.2, ""))
-
-        if not candidates:
-            return None
-
-        # Sort by confidence first, then by amount (prefer higher confidence over amount size)
-        candidates.sort(key=lambda x: (-x[1], -x[0]))
-
-        # Return the highest confidence candidate
-        best = candidates[0]
-        return FieldCandidate(
-            value=str(best[0]),
-            confidence=best[1],
-            source="ocr" if best[1] > 0.5 else "inferred",
-            needs_review=best[1] < 0.7,
-            label_context=best[2] if best[2] else None,
-        )
-
-    def _extract_vat_amount(self, text: str) -> Optional[FieldCandidate]:
-        """Extract VAT amount."""
-        for keyword in self.VAT_KEYWORDS:
-            pattern = rf"{keyword}[\s:.]*([0-9][0-9\s.,]*)|(?:[0-9][0-9\s.,]*)\s*{keyword}"
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                value = match.group(1) or match.group(0).split()[0]
-                if value:
-                    parsed = self._parse_amount(value.strip())
-                    if parsed is not None and parsed > 0:
-                        # Check if this looks like a VAT amount (typically smaller than total)
-                        return FieldCandidate(
-                            value=str(parsed),
-                            confidence=0.7,
-                            source="ocr",
-                            needs_review=True,
-                            label_context="mva",
-                        )
-        return None
-
-    def _extract_amount_excl_vat(self, text: str) -> Optional[FieldCandidate]:
-        """Extract amount excluding VAT if it can be derived safely."""
-        total = self._extract_total_amount(text)
-        vat = self._extract_vat_amount(text)
-        if total and vat:
-            try:
-                total_val = float(total.value)
-                vat_val = float(vat.value)
-                if total_val > vat_val:
-                    excl_vat = total_val - vat_val
-                    return FieldCandidate(
-                        value=str(excl_vat),
-                        confidence=0.6,
-                        source="inferred",
-                        needs_review=True,
-                        label_context="ekskl. mva",
-                    )
-            except (ValueError, TypeError):
-                pass
-        return None
-
-    def _extract_currency(self, text: str) -> Optional[FieldCandidate]:
-        """Extract currency code."""
-        currency_patterns = [
-            r"\b(NOK|nok|NOk)\b",
-            r"\b(EUR|eur|Euro|EURO)\b",
-            r"\b(USD|usd|Usd|Dollar)\b",
-            r"\b(SEK|sek|Sek)\b",
-            r"\b(DKK|dkk|Dkk)\b",
-        ]
-        for pattern in currency_patterns:
-            match = re.search(pattern, text)
-            if match:
-                currency = match.group(1).upper()
-                if currency == "NOK":
-                    return FieldCandidate(
-                        value="NOK",
-                        confidence=0.9,
-                        source="ocr",
-                        needs_review=False,
-                    )
-                return FieldCandidate(
-                    value=currency,
-                    confidence=0.8,
-                    source="ocr",
-                    needs_review=True,
-                )
-        # Default to NOK
-        return FieldCandidate(
-            value="NOK",
-            confidence=0.5,
-            source="fallback",
-            needs_review=False,
-        )
-
-    def _extract_kid(self, text: str) -> Optional[FieldCandidate]:
-        """Extract KID (payment reference) number."""
-        for pattern in self.KID_PATTERNS:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                kid = match.group(1).replace(" ", "")
-                if kid and len(kid) >= 5 and len(kid) <= 25:
-                    return FieldCandidate(
-                        value=kid,
-                        confidence=0.85,
-                        source="ocr",
-                        needs_review=False,
-                        label_context="KID",
-                    )
-        return None
-
-    def _extract_bank_account(self, text: str) -> Optional[FieldCandidate]:
-        """Extract bank account number."""
-        for pattern in self.BANK_ACCOUNT_PATTERNS:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                account = match.group(1).replace(" ", "").replace(".", "")
-                if account:
-                    return FieldCandidate(
-                        value=account,
-                        confidence=0.8,
-                        source="ocr",
-                        needs_review=True,
-                        label_context="bankkonto",
-                    )
-        return None
-
-    def _extract_description(self, lines: list[str]) -> Optional[FieldCandidate]:
-        """Extract a short description from the document."""
-        # Use supplier name as fallback description
-        supplier = self._extract_supplier_name(lines)
-        if supplier:
-            return FieldCandidate(
-                value=supplier.value,
-                confidence=supplier.confidence * 0.8,
-                source=supplier.source,
-                needs_review=True,
-            )
         return None
 
     def _parse_amount(self, value: str) -> Optional[float]:
@@ -467,7 +719,6 @@ class InvoiceFieldParser:
         # Count separators
         comma_count = value.count(",")
         dot_count = value.count(".")
-        space_count = value.count(" ")
 
         try:
             if comma_count == 1 and dot_count >= 1:
@@ -478,7 +729,6 @@ class InvoiceFieldParser:
                 normalized = value.replace(" ", "").replace(",", ".")
             elif dot_count > 1:
                 # Format: 1.234.567 or 1.234,56 with multiple dots
-                # Assume last dot is decimal separator if followed by 2 digits
                 if re.search(r"\d{2}$", value):
                     parts = value.rsplit(".", 1)
                     normalized = parts[0].replace(".", "") + "." + parts[1]

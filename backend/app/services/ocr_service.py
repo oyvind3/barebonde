@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import io
 import re
@@ -41,6 +41,7 @@ class ExtractedFields:
     bank_account: Optional[FieldCandidate] = None
     description: Optional[FieldCandidate] = None
     text_preview: Optional[str] = None
+    warnings: list[str] = field(default_factory=list)
 
 
 class OCRService:
@@ -166,6 +167,7 @@ class OCRService:
             "suggested_date": date_candidate.value if date_candidate else None,
             "suggested_supplier": supplier_candidate.value if supplier_candidate else None,
             "text_preview": parsed.get("text_preview"),
+            "warnings": parsed.get("warnings", []),
             # New structured fields
             "extracted_fields": {
                 "supplier_name": self._field_to_dict(supplier_candidate),
@@ -175,6 +177,7 @@ class OCRService:
                 "due_date": self._field_to_dict(parsed.get("due_date")),
                 "amount_total": self._field_to_dict(amount_total),
                 "amount_vat": self._field_to_dict(parsed.get("amount_vat")),
+                "amount_excl_vat": self._field_to_dict(parsed.get("amount_excl_vat")),
                 "currency": self._field_to_dict(parsed.get("currency")),
                 "kid": self._field_to_dict(parsed.get("kid")),
                 "bank_account": self._field_to_dict(parsed.get("bank_account")),
@@ -198,6 +201,7 @@ class OCRService:
             bank_account=parsed.get("bank_account"),
             description=parsed.get("description"),
             text_preview=parsed.get("text_preview"),
+            warnings=parsed.get("warnings", []),
         )
 
     def _field_to_dict(self, field: Optional[Any]) -> Optional[dict[str, Any]]:
@@ -210,6 +214,7 @@ class OCRService:
             "source": field.source,
             "needs_review": field.needs_review,
             "label_context": field.label_context,
+            "warnings": field.warnings,
         }
 
     def _extract_amount_candidates(self, text: str) -> list[float]:

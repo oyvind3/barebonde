@@ -490,6 +490,7 @@ async def upload_voucher(
             "due_date": ocr_service._field_to_dict(extracted.due_date) if extracted and extracted.due_date else None,
             "amount_total": ocr_service._field_to_dict(extracted.amount_total) if extracted and extracted.amount_total else None,
             "amount_vat": ocr_service._field_to_dict(extracted.amount_vat) if extracted and extracted.amount_vat else None,
+            "amount_excl_vat": ocr_service._field_to_dict(extracted.amount_excl_vat) if extracted and extracted.amount_excl_vat else None,
             "currency": ocr_service._field_to_dict(extracted.currency) if extracted and extracted.currency else None,
             "kid": ocr_service._field_to_dict(extracted.kid) if extracted and extracted.kid else None,
             "bank_account": ocr_service._field_to_dict(extracted.bank_account) if extracted and extracted.bank_account else None,
@@ -499,7 +500,7 @@ async def upload_voucher(
         "ocr_provider": ocr_result.provider,
         "ocr_confidence": ocr_result.confidence,
         "ocr_text_preview": extracted.text_preview if extracted else None,
-        "ocr_warnings": ocr_result.warnings,
+        "ocr_warnings": list(dict.fromkeys(ocr_result.warnings + (extracted.warnings if extracted else []))),
         "ocr_suggested_amount": float(extracted.amount_total.value) if extracted and extracted.amount_total else None,
         "ocr_suggested_date": extracted.invoice_date.value if extracted and extracted.invoice_date else None,
         "ocr_suggested_supplier": extracted.supplier_name.value if extracted and extracted.supplier_name else None,
@@ -560,24 +561,51 @@ async def review_voucher(
         require_farm_permission(Permission.VOUCHER_CREATE, require_csrf_protection=True, require_active_farm=True)
     ),
 ) -> VoucherResponse:
-    """Update user-confirmed fields on an unbooked voucher.
-    
-    This endpoint allows users to correct OCR suggestions before booking.
+    """Update user-confirmed fields on a voucher.
+
+    For unbooked vouchers all fields can be updated. For booked vouchers only
+    document metadata may change; accounting-critical fields (amount, date,
+    account, MVA code) are locked to stay consistent with the booked transaction.
     User-confirmed values are authoritative and will not be overwritten by OCR.
-    The voucher status is updated to 'ready' when all required fields are set.
     """
     item = _read_voucher(farm_id=farm_id, voucher_id=voucher_id)
-    
-    if item.get("status") == "ført":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bilaget er allerede ført og kan ikke endres.")
-    
+    is_booked = item.get("status") == "ført"
+
+    if is_booked:
+        # Reject attempts to change accounting-critical fields on booked vouchers.
+        locked_changes: list[str] = []
+        if request.amount is not None and float(request.amount) != float(item.get("amount") or 0):
+            locked_changes.append("beløp")
+        if request.voucher_date is not None and request.voucher_date != item.get("voucher_date"):
+            locked_changes.append("bilagsdato")
+        if request.account_code is not None and request.account_code != item.get("account_code"):
+            locked_changes.append("regnskapskonto")
+        if request.mva_code is not None and request.mva_code != item.get("mva_code"):
+            locked_changes.append("MVA-kode")
+
+        if locked_changes:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Bilaget er bokført. Dokumentinformasjon kan endres, men "
+                    f"{', '.join(locked_changes)} krever en egen korrigeringsflyt."
+                ),
+            )
+
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Update only fields provided in the request (partial update)
-    if request.amount is not None:
-        item["amount"] = request.amount
-    if request.voucher_date is not None:
-        item["voucher_date"] = request.voucher_date
+
+    # Accounting-critical fields: only update for unbooked vouchers.
+    if not is_booked:
+        if request.amount is not None:
+            item["amount"] = request.amount
+        if request.voucher_date is not None:
+            item["voucher_date"] = request.voucher_date
+        if request.account_code is not None:
+            item["account_code"] = request.account_code
+        if request.mva_code is not None:
+            item["mva_code"] = request.mva_code
+
+    # Metadata fields: allowed for both booked and unbooked vouchers.
     if request.description is not None:
         item["description"] = request.description
     if request.supplier_name is not None:
@@ -600,33 +628,29 @@ async def review_voucher(
         item["bank_account"] = request.bank_account
     if request.document_type is not None:
         item["document_type"] = request.document_type
-    if request.account_code is not None:
-        item["account_code"] = request.account_code
-    if request.mva_code is not None:
-        item["mva_code"] = request.mva_code
-    
-    # Update status based on ready_for_booking flag or field completeness
-    if request.ready_for_booking:
-        # Validate required fields before marking as ready
-        required_fields = ["amount", "voucher_date", "account_code", "description"]
-        missing_fields = [f for f in required_fields if not item.get(f)]
-        if missing_fields:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Manglende påkrevde felt: {', '.join(missing_fields)}"
-            )
-        item["status"] = "ready"
-    elif item.get("status") == "needs_review":
-        # Keep in needs_review until explicitly marked ready
-        pass
-    
+
+    # Status transitions only apply to unbooked vouchers.
+    if not is_booked:
+        if request.ready_for_booking:
+            required_fields = ["amount", "voucher_date", "account_code", "description"]
+            missing_fields = [f for f in required_fields if not item.get(f)]
+            if missing_fields:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Manglende påkrevde felt: {', '.join(missing_fields)}"
+                )
+            item["status"] = "ready"
+        elif item.get("status") == "needs_review":
+            # Keep in needs_review until explicitly marked ready
+            pass
+
     item["updated_at"] = now
-    
+
     try:
         get_documents_container().replace_item(item=item["id"], body=item)
     except Exception as exc:
         raise _service_unavailable("Kunne ikke lagre endringene. Prøv igjen.", exc) from exc
-    
+
     _write_audit_event("VoucherReviewed", farm_id, authorized.current.user["user_id"])
     return _voucher_response(item)
 
