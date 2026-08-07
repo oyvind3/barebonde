@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -104,22 +105,6 @@ export default function BilagPage() {
     setStatusFilter('')
     setDateFrom('')
     setDateTo('')
-  }
-
-  const downloadVoucher = async (item: Voucher) => {
-    setError('')
-    try {
-      const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/documents/${encodeURIComponent(item.id)}/download`)
-      if (!response.ok) throw new Error(await apiErrorMessage(response, 'Klarte ikke laste ned dokumentet'))
-      const objectUrl = URL.createObjectURL(await response.blob())
-      const link = document.createElement('a')
-      link.href = objectUrl
-      link.download = item.file_name
-      link.click()
-      URL.revokeObjectURL(objectUrl)
-    } catch (downloadError) {
-      setError(downloadError instanceof Error ? downloadError.message : 'Klarte ikke laste ned dokumentet')
-    }
   }
 
   const summary = useMemo(() => {
@@ -293,9 +278,9 @@ export default function BilagPage() {
                           </span>
                         </td>
                         <td className="p-3">
-                          <button type="button" onClick={() => downloadVoucher(item)} className="text-bonde-green hover:underline">
+                          <Link href={`/bilag/detalj?id=${encodeURIComponent(item.id)}`} className="text-bonde-green hover:underline">
                             Åpne
-                          </button>
+                          </Link>
                         </td>
                       </tr>
                     ))}

@@ -195,9 +195,19 @@ export default function OnboardingPage() {
 
         {/* Main content card */}
         <div className="rounded-2xl bg-white p-6 shadow-lg border border-stone-100">
-          {/* Step 1: Profile */}
+          {/* Step 1: Account / e-post */}
           <OnboardingStep
             stepNumber={1}
+            title="Konto"
+            description="E-postadressen din er bekreftet når kontoen er aktiv."
+            isCompleted={state.completed_steps.includes('identity')}
+            href="/profile"
+            linkText={state.completed_steps.includes('identity') ? 'Kontoen er aktiv' : 'Bekreft e-post'}
+          />
+
+          {/* Step 2: Profile */}
+          <OnboardingStep
+            stepNumber={2}
             title="Personlig profil"
             description="Fullfør navn, telefon og aksepter vilkår/personvern."
             isCompleted={state.completed_steps.includes('profile')}
@@ -215,9 +225,9 @@ export default function OnboardingPage() {
             )}
           </OnboardingStep>
 
-          {/* Step 2: Farm/Virksomhet */}
+          {/* Step 3: Farm/Virksomhet */}
           <OnboardingStep
-            stepNumber={2}
+            stepNumber={3}
             title="Virksomhet"
             description="Registrer eller velg gården din"
             isCompleted={state.completed_steps.includes('farm')}
@@ -225,9 +235,9 @@ export default function OnboardingPage() {
             linkText={state.completed_steps.includes('farm') ? 'Se gård' : 'Opprett eller velg gård'}
           />
 
-          {/* Step 3: Farm settings */}
+          {/* Step 4: Farm settings */}
           <OnboardingStep
-            stepNumber={3}
+            stepNumber={4}
             title="Gårdsinnstillinger"
             description="Tilpass hvordan du vil drive gården"
             isCompleted={state.completed_steps.includes('farm_settings')}
@@ -235,9 +245,9 @@ export default function OnboardingPage() {
             linkText="Åpne gårdsinnstillinger"
           />
 
-          {/* Step 4: Bank account (optional) */}
+          {/* Step 5: Bank account (optional) */}
           <OnboardingStep
-            stepNumber={4}
+            stepNumber={5}
             title="Bankkonto"
             description="Legg til bankkonto for enklere betalinger (valgfritt)"
             isCompleted={state.completed_steps.includes('bank_account')}
@@ -246,7 +256,7 @@ export default function OnboardingPage() {
             optional
           />
 
-          {/* Step 5: Interests */}
+          {/* Step 6: Interests */}
           <section id="interests" className="border-b border-gray-100 pb-6 last:border-0">
             <div className="flex items-start gap-4">
               <div 
@@ -256,7 +266,7 @@ export default function OnboardingPage() {
                     : 'bg-gray-200 text-gray-600'
                 }`}
               >
-                {state.completed_steps.includes('interests') ? '✓' : '5'}
+                {state.completed_steps.includes('interests') ? '✓' : '6'}
               </div>
               <div className="flex-1">
                 <h2 className="font-semibold text-gray-900">

@@ -31,6 +31,8 @@ def onboarding_status(user: dict, memberships: list[dict]) -> dict:
         completed.append("profile")
     if memberships:
         completed.append("farm")
+    if user.get("onboarding_interests"):
+        completed.append("interests")
     current = str(user.get("onboarding_current_step") or next((step for step in STEPS if step not in completed), "summary"))
     return {"completed": bool(user.get("onboarding_completed_at")), "current_step": current, "completed_steps": completed, "completion_percent": round(len(completed) / len(STEPS) * 100), "interests": list(user.get("onboarding_interests") or [])}
 

@@ -8,13 +8,12 @@ import { Button } from '@/components/ui/Button'
 import { Company, CompanySearch } from '@/components/ui/CompanySearch'
 import { apiFetch, bootstrapIdentity } from '@/lib/api'
 
-type SetupStep = 'business' | 'operations' | 'account' | 'verifyEmail' | 'payment' | 'confirmation'
+type SetupStep = 'business' | 'operations' | 'account' | 'verifyEmail' | 'confirmation'
 
 const setupSteps: Array<{ id: Exclude<SetupStep, 'confirmation'>; label: string }> = [
   { id: 'business', label: 'Foretak' },
   { id: 'operations', label: 'Drift' },
   { id: 'account', label: 'Deg' },
-  { id: 'payment', label: 'Betaling' },
 ]
 
 const primaryFarmOptions = [
@@ -58,6 +57,71 @@ function toggleValue(values: string[], value: string): string[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
 }
 
+type OnboardingDraft = {
+  farmName?: string
+  orgNumber?: string
+  farmAddress?: string
+  farmPostalCode?: string
+  farmCity?: string
+  farmMunicipality?: string
+  farmIndustryCode?: string
+  organizationForm?: string
+  isManualMode?: boolean
+  selectedCompanyName?: string
+  selectedCompanyOrgNumber?: string
+  primaryFarmType?: string
+  productionTypes?: string[]
+  farmSizeRange?: string
+  teamSize?: string
+  onboardingGoals?: string[]
+  firstName?: string
+  lastName?: string
+  email?: string
+  phoneNumber?: string
+  personalAddress?: string
+  onboardingRole?: string
+}
+
+function readOnboardingDraft(): OnboardingDraft | null {
+  try {
+    const saved = window.localStorage.getItem(ONBOARDING_DRAFT_KEY)
+    return saved ? (JSON.parse(saved) as OnboardingDraft) : null
+  } catch {
+    return null
+  }
+}
+
+/** Create the farm directly from the saved draft (used after magic-link verification). */
+async function createFarmFromDraft(): Promise<void> {
+  const draft = readOnboardingDraft()
+  if (!draft) throw new Error('Fant ikke lagret oppsett. Fyll ut skjemaet på nytt.')
+  const farmResponse = await apiFetch('/api/farms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: draft.selectedCompanyName || draft.farmName || '',
+      org_number: draft.selectedCompanyOrgNumber || draft.orgNumber || '',
+      address: draft.farmAddress || '',
+      postal_code: draft.farmPostalCode || '',
+      city: draft.farmCity || '',
+      municipality: draft.farmMunicipality || '',
+      manual_entry: Boolean(draft.isManualMode),
+      organization_form: draft.organizationForm || '',
+      industry_code: draft.farmIndustryCode || '',
+      primary_farm_type: draft.primaryFarmType || '',
+      production_types: draft.productionTypes || [],
+      farm_size_range: draft.farmSizeRange || 'vet_ikke',
+      team_size: draft.teamSize || '1',
+      onboarding_goals: draft.onboardingGoals || [],
+    }),
+  })
+  const farm = await farmResponse.json().catch(() => ({}))
+  if (!farmResponse.ok) throw new Error(farm.detail || 'Kunne ikke opprette gården.')
+  const updatedIdentity = await bootstrapIdentity(farm.id)
+  if (updatedIdentity?.active_farm?.id) window.localStorage.setItem('barebonde_active_farm_id', updatedIdentity.active_farm.id)
+  window.localStorage.removeItem(ONBOARDING_DRAFT_KEY)
+}
+
 export default function FarmSetupPage() {
   const router = useRouter()
   const [step, setStep] = useState<SetupStep>('business')
@@ -66,7 +130,7 @@ export default function FarmSetupPage() {
   const [resendLoading, setResendLoading] = useState(false)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ sent: boolean; message: string } | null>(null)
-  const [emailVerified, setEmailVerified] = useState(false)
+  const [_emailVerified, setEmailVerified] = useState(false)
 
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [isManualMode, setIsManualMode] = useState(false)
@@ -91,9 +155,6 @@ export default function FarmSetupPage() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [personalAddress, setPersonalAddress] = useState('')
   const [onboardingRole, setOnboardingRole] = useState('owner')
-
-  const [paymentMethod, setPaymentMethod] = useState<'faktura' | 'vipps'>('faktura')
-  const [billingEmail, setBillingEmail] = useState('')
 
   const activeStepIndex = step === 'verifyEmail' ? 2 : setupSteps.findIndex((item) => item.id === step)
   const isSetupStep = step !== 'confirmation'
@@ -124,8 +185,6 @@ export default function FarmSetupPage() {
         setPhoneNumber(draft.phoneNumber || '')
         setPersonalAddress(draft.personalAddress || '')
         setOnboardingRole(draft.onboardingRole || 'owner')
-        setPaymentMethod(draft.paymentMethod || 'faktura')
-        setBillingEmail(draft.billingEmail || '')
       } catch {
         window.localStorage.removeItem(ONBOARDING_DRAFT_KEY)
       }
@@ -146,7 +205,13 @@ export default function FarmSetupPage() {
           window.history.replaceState({}, '', '/farm/setup')
           setEmailVerified(true)
           setEmailStatus({ sent: true, message: 'E-postadressen er bekreftet.' })
-          setStep('payment')
+          // Auto-create farm from the saved draft after email verification
+          try {
+            await createFarmFromDraft()
+            setStep('confirmation')
+          } catch (farmError) {
+            setError(farmError instanceof Error ? farmError.message : 'Kunne ikke opprette gården automatisk.')
+          }
         } catch (verificationError) {
           setError(verificationError instanceof Error ? verificationError.message : 'Bekreftelseslenken kunne ikke brukes.')
           setStep('verifyEmail')
@@ -226,8 +291,6 @@ export default function FarmSetupPage() {
       phoneNumber,
       personalAddress,
       onboardingRole,
-      paymentMethod,
-      billingEmail,
     }))
   }
 
@@ -292,59 +355,6 @@ export default function FarmSetupPage() {
     }
   }
 
-  const handleFinalSubmit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setLoading(true)
-    setError(null)
-
-    const finalFarmName = selectedCompany?.name || farmName.trim()
-    const finalOrgNumber = selectedCompany?.org_number || orgNumber.trim()
-
-    try {
-      if (!emailVerified) {
-        throw new Error('Bekreft e-postadressen før du oppretter gården.')
-      }
-      const identity = await bootstrapIdentity()
-      if (!identity) {
-        throw new Error('Bekreft e-postadressen fra lenken før du oppretter gården.')
-      }
-      const farmResponse = await apiFetch('/api/farms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: finalFarmName,
-          org_number: finalOrgNumber,
-          address: farmAddress.trim(),
-          postal_code: farmPostalCode.trim(),
-          city: farmCity.trim(),
-          municipality: farmMunicipality.trim(),
-          manual_entry: isManualMode,
-          organization_form: organizationForm,
-          industry_code: farmIndustryCode,
-          primary_farm_type: primaryFarmType,
-          production_types: productionTypes,
-          farm_size_range: farmSizeRange,
-          team_size: teamSize,
-          onboarding_goals: onboardingGoals,
-          billing_method: paymentMethod,
-          billing_email: billingEmail.trim() || undefined,
-        }),
-      })
-      const farm = await farmResponse.json().catch(() => ({}))
-      if (!farmResponse.ok) throw new Error(farm.detail || 'Kunne ikke opprette gården.')
-      const updatedIdentity = await bootstrapIdentity(farm.id)
-      if (updatedIdentity?.active_farm?.id) window.localStorage.setItem('barebonde_active_farm_id', updatedIdentity.active_farm.id)
-      window.localStorage.removeItem(ONBOARDING_DRAFT_KEY)
-      setStep('confirmation')
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Kunne ikke fullføre registreringen. Prøv igjen.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const selectedFarmOption = primaryFarmOptions.find((option) => option.value === primaryFarmType)
-
   return (
     <div className="flex min-h-screen flex-col bg-bonde-oat font-sans text-stone-900">
       <Navbar />
@@ -366,7 +376,7 @@ export default function FarmSetupPage() {
           </div>
 
           {isSetupStep && (
-            <ol className="mb-7 grid grid-cols-4 gap-2" aria-label="Fremdrift i oppsettet">
+            <ol className="mb-7 grid grid-cols-3 gap-2" aria-label="Fremdrift i oppsettet">
               {setupSteps.map((item, index) => {
                 const isActive = item.id === step || (step === 'verifyEmail' && item.id === 'account')
                 const isComplete = index < activeStepIndex
@@ -392,7 +402,7 @@ export default function FarmSetupPage() {
             {step === 'business' && (
               <div className="space-y-7">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 1 av 4</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 1 av 3</p>
                   <h2 className="mt-1 text-xl font-semibold">Hvilket foretak gjelder det?</h2>
                   <p className="mt-1 text-sm text-stone-600">Søk i Brønnøysundregistrene, så fyller vi ut selskapsform og bransje der det finnes.</p>
                 </div>
@@ -480,7 +490,7 @@ export default function FarmSetupPage() {
             {step === 'operations' && (
               <div className="space-y-7">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 2 av 4</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 2 av 3</p>
                   <h2 className="mt-1 text-xl font-semibold">Fortell litt om driften</h2>
                   <p className="mt-1 text-sm text-stone-600">Dette velger startsiden, snarveier og forslag som passer gården din.</p>
                 </div>
@@ -549,9 +559,9 @@ export default function FarmSetupPage() {
             {step === 'account' && (
               <div className="space-y-7">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 3 av 4</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 3 av 3</p>
                   <h2 className="mt-1 text-xl font-semibold">Hvem skal bruke Barebonde?</h2>
-                  <p className="mt-1 text-sm text-stone-600">Vi bruker opplysningene til å sette opp kontoen og tilpasse opplevelsen. E-postadressen bekreftes før dere velger betaling.</p>
+                  <p className="mt-1 text-sm text-stone-600">Vi bruker opplysningene til å sette opp kontoen og tilpasse opplevelsen.</p>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -571,7 +581,7 @@ export default function FarmSetupPage() {
                   </div>
                 </fieldset>
 
-                <p className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">Du trenger ikke passord. Vi sender en sikker engangslenke som bekrefter e-postadressen før dere går videre til betaling.</p>
+                <p className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">Du trenger ikke passord. Vi sender en sikker engangslenke som bekrefter e-postadressen og oppretter gården din.</p>
 
                 <div className="flex gap-3">
                   <Button type="button" variant="secondary" onClick={() => { setError(null); setStep('operations') }}>Tilbake</Button>
@@ -583,9 +593,9 @@ export default function FarmSetupPage() {
             {step === 'verifyEmail' && (
               <div className="space-y-7">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 3 av 4</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 3 av 3</p>
                   <h2 className="mt-1 text-xl font-semibold">Bekreft e-postadressen din</h2>
-                  <p className="mt-1 text-sm text-stone-600">Vi har sendt en engangslenke til <strong>{email}</strong>. Åpne lenken for å bekrefte e-postadressen og fortsette til betaling.</p>
+                  <p className="mt-1 text-sm text-stone-600">Vi har sendt en engangslenke til <strong>{email}</strong>. Åpne lenken for å bekrefte e-postadressen og fullføre oppsettet.</p>
                 </div>
 
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
@@ -599,39 +609,6 @@ export default function FarmSetupPage() {
                 </div>
                 {resendMessage && <p className="text-sm text-stone-600">{resendMessage}</p>}
               </div>
-            )}
-
-            {step === 'payment' && (
-              <form onSubmit={handleFinalSubmit} className="space-y-7">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-bonde-green">Steg 4 av 4</p>
-                  <h2 className="mt-1 text-xl font-semibold">Velg hvordan dere vil betale</h2>
-                  <p className="mt-1 text-sm text-stone-600">Prøveperioden er gratis i 30 dager. Betalingsvalg kan endres senere.</p>
-                </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><strong>0 kr de første 30 dagene.</strong><br /><span className="text-xs">Abonnementet er 290 kr/mnd etter prøveperioden og kan avsluttes når som helst.</span></div>
-
-                <fieldset className="space-y-3">
-                  <legend className={labelClass}>Betalingsmetode</legend>
-                  {[
-                    ['faktura', 'EHF eller e-postfaktura', 'Passer når foretaket skal motta faktura.'],
-                    ['vipps', 'Vipps faste betalinger', 'Automatisk månedlig trekk via Vipps-appen.'],
-                  ].map(([value, label, description]) => (
-                    <button key={value} type="button" onClick={() => setPaymentMethod(value as 'faktura' | 'vipps')} className={`flex w-full items-center justify-between gap-4 rounded-xl border-2 p-4 text-left transition ${paymentMethod === value ? 'border-bonde-green bg-emerald-50/70' : 'border-stone-200 hover:border-stone-300'}`}>
-                      <span><span className="block text-sm font-semibold">{label}</span><span className="mt-1 block text-xs text-stone-600">{description}</span></span>
-                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${paymentMethod === value ? 'border-bonde-green' : 'border-stone-300'}`}>{paymentMethod === value && <span className="h-2.5 w-2.5 rounded-full bg-bonde-green" />}</span>
-                    </button>
-                  ))}
-                </fieldset>
-
-                {paymentMethod === 'faktura' && <div><label className={labelClass} htmlFor="billing-email">E-post for faktura <span className="normal-case font-normal text-stone-500">(valgfritt)</span></label><input id="billing-email" type="email" value={billingEmail} onChange={(event) => setBillingEmail(event.target.value)} className={inputClass} placeholder={email || 'faktura@solberggard.no'} /></div>}
-
-                <div className="rounded-xl bg-stone-50 p-4 text-xs text-stone-600"><p className="font-semibold text-stone-800">Oppsummering</p><p className="mt-1">{finalFarmNameForSummary(selectedCompany, farmName)} · {selectedFarmOption?.label || 'Drift ikke valgt'} · {onboardingGoals.length} valgte område{onboardingGoals.length === 1 ? '' : 'r'}</p></div>
-
-                <div className="flex gap-3">
-                  <Button type="button" variant="secondary" onClick={() => { setError(null); setStep('account') }}>Tilbake</Button>
-                  <Button type="submit" disabled={loading} fullWidth showArrow>{loading ? 'Oppretter konto...' : 'Opprett konto'}</Button>
-                </div>
-              </form>
             )}
 
             {step === 'confirmation' && (
@@ -649,8 +626,4 @@ export default function FarmSetupPage() {
       </main>
     </div>
   )
-}
-
-function finalFarmNameForSummary(selectedCompany: Company | null, farmName: string): string {
-  return selectedCompany?.name || farmName || 'Gården din'
 }
