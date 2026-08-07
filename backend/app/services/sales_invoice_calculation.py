@@ -103,6 +103,30 @@ def calculate_totals(lines: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def calculate_invoice(lines: list[dict[str, Any]]) -> dict[str, Any]:
+    """Backend-authoritative calculation for a set of invoice lines.
+
+    Accepts lines with raw inputs (quantity, unit_price_ex_vat_ore, vat_rate)
+    and returns the same lines enriched with computed integer øre amounts,
+    plus invoice totals. This is the single source of truth for amounts.
+    """
+    calculated_lines: list[dict[str, Any]] = []
+    for line in lines:
+        computed = calculate_line(
+            quantity=line.get("quantity"),
+            unit_price_ex_vat_ore=line.get("unit_price_ex_vat_ore"),
+            vat_rate=line.get("vat_rate"),
+        )
+        enriched = dict(line)
+        enriched.update(computed)
+        calculated_lines.append(enriched)
+    totals = calculate_totals(calculated_lines)
+    return {
+        "lines": calculated_lines,
+        **totals,
+    }
+
+
 def format_nok(ore: int) -> str:
     """Format integer øre as a Norwegian-style NOK string, e.g. 312500 -> '3 125,00'."""
     negative = ore < 0

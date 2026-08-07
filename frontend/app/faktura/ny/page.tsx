@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
@@ -70,7 +70,7 @@ function emptyLine(): LineDraft {
   return { description: '', quantity: '1', unit: 'stk', priceKr: '', vat_rate: 25 }
 }
 
-export default function NyFakturaPage() {
+function NyFakturaPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const editId = searchParams.get('id') || ''
@@ -592,5 +592,19 @@ export default function NyFakturaPage() {
         </div>
       </main>
     </>
+  )
+}
+
+export default function NyFakturaPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-bonde-oat flex flex-col font-sans items-center justify-center">
+          <p className="text-sm text-stone-600">Laster fakturautkast …</p>
+        </div>
+      }
+    >
+      <NyFakturaPageInner />
+    </Suspense>
   )
 }

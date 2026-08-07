@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Navbar } from '@/components/navigation/Navbar'
@@ -82,7 +82,7 @@ function statusBadgeClass(status: string): string {
   return 'bg-stone-100 text-stone-500'
 }
 
-export default function FakturaDetaljPage() {
+function FakturaDetaljPageInner() {
   const searchParams = useSearchParams()
   const invoiceId = searchParams.get('id') || ''
   const justIssued = searchParams.get('issued') === '1'
@@ -369,5 +369,19 @@ export default function FakturaDetaljPage() {
         )}
       </main>
     </>
+  )
+}
+
+export default function FakturaDetaljPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-bonde-oat flex flex-col font-sans items-center justify-center">
+          <p className="text-sm text-stone-600">Laster faktura …</p>
+        </div>
+      }
+    >
+      <FakturaDetaljPageInner />
+    </Suspense>
   )
 }
