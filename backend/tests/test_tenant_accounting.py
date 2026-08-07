@@ -177,6 +177,7 @@ def make_client(monkeypatch, *, role="owner", documents=None, transactions=None,
     monkeypatch.setattr(accounting, "get_transactions_container", lambda: state.transactions)
     monkeypatch.setattr(accounting, "get_audit_logs_container", lambda: state.audits)
     monkeypatch.setattr(accounting, "storage_service", state.storage)
+    monkeypatch.setattr(accounting.journal_service, "list_entries", lambda farm_id, **_: [])
     monkeypatch.setattr(accounting.ocr_service, "extract_text", lambda **_: OCRResult("Diesel 100,00", "fake-ocr", 0.9, []))
     monkeypatch.setattr(
         accounting.ocr_service,
