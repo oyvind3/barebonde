@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, field_validator, field_serializer
 
@@ -20,6 +21,7 @@ from app.core.security_tokens import IdentitySecurityConfigurationError
 from app.services.challenge_service import ChallengeService, InvalidChallengeError
 from app.services.email_service import (
     EmailDeliveryError,
+    _get_plunk_config,
     send_transactional_email,
     validate_plunk_configured,
 )
@@ -242,7 +244,7 @@ async def _send_confirmation_email(
 ) -> None:
     """Send the onboarding e-mail link used to verify the address."""
     # Fail before creating a reusable challenge if delivery is not configured.
-    validate_plunk_configured()
+    _get_plunk_config()
     safe_name = html.escape(first_name or "Bonde")
     raw_token = ChallengeService().create_email_registration_challenge(
         email=email, registration_profile=registration_profile
@@ -372,7 +374,7 @@ async def send_magic_link(req: MagicLinkRequest) -> dict[str, str]:
     """Create a single-use e-mail login challenge and submit it through Plunk."""
     try:
         # Avoid persisting a valid challenge when no e-mail provider is configured.
-        validate_plunk_configured()
+        _get_plunk_config()
         raw_token = ChallengeService().create_email_login_challenge(
             email=str(req.email), first_name=req.first_name or "Bonde"
         )
@@ -399,7 +401,7 @@ async def send_magic_link(req: MagicLinkRequest) -> dict[str, str]:
 async def request_login_email(req: MagicLinkRequest) -> dict[str, str]:
     """Send a login link only for an already registered identity."""
     try:
-        validate_plunk_configured()
+        _get_plunk_config()
         raw_token = ChallengeService().create_email_login_challenge(email=str(req.email))
     except IdentityError as exc:
         if str(exc) == "account_not_found":
@@ -418,7 +420,7 @@ async def request_login_email(req: MagicLinkRequest) -> dict[str, str]:
 async def request_registration_email(req: MagicLinkRequest) -> dict[str, str]:
     """Start explicit registration without creating a User before verification."""
     try:
-        validate_plunk_configured()
+        _get_plunk_config()
         raw_token = ChallengeService().create_email_registration_challenge(email=str(req.email))
     except IdentityError as exc:
         if str(exc) == "account_already_exists":
