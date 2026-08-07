@@ -3,9 +3,8 @@
 import { useEffect, useState } from 'react'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
-import { apiErrorMessage, apiFetch, bootstrapIdentity } from '@/lib/api'
-
-const FARM_ID_KEY = 'barebonde_active_farm_id'
+import { apiErrorMessage, apiFetch } from '@/lib/api'
+import { useIdentity } from '@/lib/identity'
 
 type MonthlyRow = { month: string; income: number; expense: number; net: number }
 type GrantRow = { voucher_date: string; amount: number; description: string; period: string }
@@ -13,11 +12,12 @@ type JournalRow = { voucher_id: string; date: string; file_name: string; status:
 type LiquidityPoint = { date: string; description: string; balance: number }
 
 export default function ReportsPage() {
-  const [farmId, setFarmId] = useState('')
+  const { status, identity, activeFarm } = useIdentity()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [identityLoaded, setIdentityLoaded] = useState(false)
-  const [entitlements, setEntitlements] = useState<Record<string, boolean>>({})
+
+  const farmId = activeFarm?.id || ''
+  const entitlements = identity?.entitlements || {}
 
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
   const [vat, setVat] = useState({ incoming_vat: 0, outgoing_vat: 0, estimated_settlement: 0 })
@@ -30,25 +30,7 @@ export default function ReportsPage() {
   })
 
   useEffect(() => {
-    const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    bootstrapIdentity(storedFarmId)
-      .then((identity) => {
-        const activeFarmId = identity?.active_farm?.id || ''
-        setEntitlements(identity?.entitlements || {})
-        setFarmId(activeFarmId)
-        if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
-        else window.localStorage.removeItem(FARM_ID_KEY)
-      })
-      .catch(() => {
-        setError('Kunne ikke hente den aktive gården.')
-        setEntitlements({})
-        setFarmId('')
-      })
-      .finally(() => setIdentityLoaded(true))
-  }, [])
-
-  useEffect(() => {
-    if (!identityLoaded) return
+    if (status === 'loading') return
     if (!farmId) {
       setLoading(false)
       return
@@ -96,7 +78,7 @@ export default function ReportsPage() {
     }
 
     run()
-  }, [entitlements, farmId, identityLoaded])
+  }, [entitlements, farmId, status])
 
   const money = (value: number) =>
     new Intl.NumberFormat('nb-NO', { style: 'currency', currency: 'NOK', maximumFractionDigits: 0 }).format(value)
@@ -170,6 +152,15 @@ export default function ReportsPage() {
                 <p className="text-xs uppercase tracking-wider font-semibold text-stone-500">Estimat MVA-oppgjør</p>
                 <p className="text-2xl font-serif text-stone-900 mt-1">{money(vat.estimated_settlement)}</p>
               </Card>
+            </div>
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-stone-700">
+              <p className="font-semibold text-stone-900">Merk</p>
+              <p className="mt-1">
+                MVA-tallene er estimater basert på førte bilag. Barebonde støtter foreløpig ikke
+                MVA-innsending til Altinn. Tallene erstatter ikke regnskapsfører eller innsending
+                av MVA-melding.
+              </p>
             </div>
 
             <Card hoverEffect={false} className="p-6 bg-white">

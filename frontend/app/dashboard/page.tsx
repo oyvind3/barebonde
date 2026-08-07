@@ -1,67 +1,39 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { apiErrorMessage, apiFetch, bootstrapIdentity, IdentityBootstrap } from '@/lib/api'
+import { apiErrorMessage, apiFetch } from '@/lib/api'
+import { useIdentity } from '@/lib/identity'
 
 type MonthlyRow = { month: string; income: number; expense: number; net: number }
 
-const FARM_ID_KEY = 'barebonde_active_farm_id'
-
 export default function Dashboard() {
-  const [farmId, setFarmId] = useState('')
+  const { status, identity, activeFarm, setActiveFarm } = useIdentity()
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [monthlyRows, setMonthlyRows] = useState<MonthlyRow[]>([])
   const [vat, setVat] = useState({ incoming_vat: 0, outgoing_vat: 0, estimated_settlement: 0 })
   const [journalCount, setJournalCount] = useState(0)
 
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [memberships, setMemberships] = useState<IdentityBootstrap['memberships']>([])
-  const [subscription, setSubscription] = useState<IdentityBootstrap['subscription']>(null)
-  const [entitlements, setEntitlements] = useState<Record<string, boolean>>({})
-  const [onboarding, setOnboarding] = useState<IdentityBootstrap['onboarding']>(undefined)
+  const farmId = activeFarm?.id || ''
 
+  // Redirect unauthenticated users
   useEffect(() => {
-    const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    bootstrapIdentity(storedFarmId)
-      .then((identity) => {
-        setIsAuthenticated(Boolean(identity))
-        setMemberships(identity?.memberships || [])
-        setSubscription(identity?.subscription || null)
-        setEntitlements(identity?.entitlements || {})
-        setOnboarding(identity?.onboarding)
-        const activeFarmId = identity?.active_farm?.id || ''
-        setFarmId(activeFarmId)
-        if (activeFarmId) window.localStorage.setItem(FARM_ID_KEY, activeFarmId)
-        else window.localStorage.removeItem(FARM_ID_KEY)
-      })
-      .catch(() => {
-        setIsAuthenticated(false)
-        setMemberships([])
-        setSubscription(null)
-        setEntitlements({})
-        setOnboarding(undefined)
-        setFarmId('')
-      })
-  }, [])
-
-  const selectFarm = async (nextFarmId: string) => {
-    const isMember = memberships.some((membership) => membership.farm.id === nextFarmId)
-    if (!isMember) return
-    window.localStorage.setItem(FARM_ID_KEY, nextFarmId)
-    setFarmId(nextFarmId)
-    try {
-      const identity = await bootstrapIdentity(nextFarmId)
-      setSubscription(identity?.subscription || null)
-      setEntitlements(identity?.entitlements || {})
-    } catch {
-      setSubscription(null)
-      setEntitlements({})
+    if (status === 'anonymous' || status === 'error') {
+      router.replace('/login')
     }
-  }
+  }, [status, router])
+
+  // Redirect users without a farm
+  useEffect(() => {
+    if (status === 'authenticated' && identity && !activeFarm) {
+      router.replace('/farm/setup')
+    }
+  }, [status, identity, activeFarm, router])
 
   useEffect(() => {
     if (!farmId) {
@@ -120,6 +92,24 @@ export default function Dashboard() {
   const money = (value: number) =>
     new Intl.NumberFormat('nb-NO', { style: 'currency', currency: 'NOK', maximumFractionDigits: 0 }).format(value)
 
+  if (status === 'loading' || status === 'authenticated' && !identity) {
+    return (
+      <div className="min-h-screen bg-bonde-oat flex flex-col font-sans">
+        <Navbar />
+        <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 py-10 w-full">
+          <div className="animate-pulse space-y-6">
+            <div className="h-8 w-64 rounded bg-stone-200" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((i) => <div key={i} className="h-32 rounded-xl bg-stone-200" />)}
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  if (!identity || !activeFarm) return null
+
   return (
     <div className="min-h-screen bg-bonde-oat flex flex-col font-sans">
       <Navbar />
@@ -132,7 +122,7 @@ export default function Dashboard() {
               Gårdsoversikt
             </span>
             <h1 className="text-3xl sm:text-4xl font-serif text-stone-900">
-              Gårdens kontrollpanel
+              {activeFarm.name}
             </h1>
             <p className="text-stone-600 text-sm mt-1">
               Regnskap, bilag og rapporter samlet på ett sted.
@@ -146,131 +136,108 @@ export default function Dashboard() {
             <Button href="/reports" variant="outline" showArrow>
               RAPPORTER
             </Button>
-            <Button href="/farm/setup" variant="outline" showArrow>
-              ENDRE GÅRD
-            </Button>
           </div>
         </div>
 
-        {memberships.length > 1 && (
+        {identity.memberships.length > 1 && (
           <div className="mb-6 flex max-w-sm flex-col gap-1">
             <label htmlFor="active-farm" className="text-xs font-bold uppercase tracking-wider text-stone-600">Aktiv gård</label>
-            <select id="active-farm" value={farmId} onChange={(event) => selectFarm(event.target.value)} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800">
-              {memberships.map((membership) => <option key={membership.farm.id} value={membership.farm.id}>{membership.farm.name}</option>)}
+            <select id="active-farm" value={farmId} onChange={(event) => setActiveFarm(event.target.value)} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800">
+              {identity.memberships.map((m) => <option key={m.farm.id} value={m.farm.id}>{m.farm.name}</option>)}
             </select>
           </div>
         )}
 
-        {/* Preview shown until a server-managed session is present. */}
-        {!isAuthenticated && (
-          <div className="mb-10 bg-white border border-emerald-200/90 rounded-2xl p-8 shadow-xl text-center relative overflow-hidden">
-            <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-100 rounded-full blur-2xl opacity-60 pointer-events-none" />
-            <div className="max-w-xl mx-auto space-y-4">
-              <span className="bg-emerald-100 text-emerald-900 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                🔒 Låst for besøkende — Sneak Peak Mode
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-serif text-stone-900 font-normal">
-                Prøv Barebonde gratis i 30 dager
-              </h2>
-              <p className="text-stone-600 text-sm">
-                Nedenfor ser du en demonstrasjon av kontrollpanelet. Opprett din konto og registrér gården din for å aktivere full tilgang til bilagsføring, MVA-rapporter og regnskap.
-              </p>
-
-              <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
-                <Button href="/farm/setup" variant="primary" showArrow>
-                  START 30 DAGERS GRATIS PRØVEPERIODE
-                </Button>
-                <Button href="/login" variant="secondary">
-                  LOGG INN MED E-POST
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!farmId && isAuthenticated && (
-          <Card hoverEffect={false} className="p-6 bg-white mb-10">
-            <p className="text-sm text-stone-700">Sett opp gård først for å aktivere regnskap og bilag.</p>
-          </Card>
-        )}
-
-        {farmId && loading && (
+        {loading && (
           <Card hoverEffect={false} className="p-6 bg-white mb-10">
             <p className="text-sm text-stone-700">Laster regnskapsdata...</p>
           </Card>
         )}
 
-        {farmId && error && (
+        {error && (
           <Card hoverEffect={false} className="p-6 bg-white mb-10">
             <p className="text-sm text-red-700">{error}</p>
           </Card>
         )}
 
-        {isAuthenticated && onboarding && !onboarding.completed && (
+        {identity.onboarding && !identity.onboarding.completed && (
           <Card hoverEffect={false} className="mb-8 border border-amber-200 bg-amber-50 p-5">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="font-semibold text-stone-900">Kom i gang med Barebonde</p><p className="text-sm text-stone-700">{onboarding.completed_steps.length} av 7 steg registrert. Bankkonto er valgfri og blokkerer ikke bruk.</p></div><Button href="/onboarding" variant="outline">Fortsett</Button></div>
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className="font-semibold text-stone-900">Kom i gang med Barebonde</p>
+                <p className="text-sm text-stone-700">{identity.onboarding.completed_steps.length} av 7 steg registrert. Bankkonto er valgfri og blokkerer ikke bruk.</p>
+              </div>
+              <Button href="/onboarding" variant="outline">Fortsett</Button>
+            </div>
           </Card>
         )}
 
-        {isAuthenticated && farmId && subscription && (
+        {identity.subscription && (
           <Card hoverEffect={false} className="mb-8 flex flex-col gap-3 border border-emerald-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Aktiv plan</p>
-              <p className="mt-1 text-lg font-semibold text-stone-900">{subscription.display_name}</p>
+              <p className="mt-1 text-lg font-semibold text-stone-900">{identity.subscription.display_name}</p>
             </div>
-            {!entitlements['reports.advanced.enabled'] && (
-              <div className="max-w-md rounded-lg bg-stone-50 px-4 py-3 text-sm text-stone-700">
-                <p className="font-semibold text-stone-900">Likviditetsoversikt er låst</p>
-                <p>Denne funksjonen krever Standard eller Premium.</p>
-                <button type="button" disabled className="mt-2 cursor-not-allowed rounded border border-stone-300 px-3 py-1 text-xs font-semibold text-stone-500">
-                  Kommer snart
-                </button>
-              </div>
-            )}
           </Card>
         )}
 
-        {/* Metrics Grid with Sneak Peak Gating */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 ${!isAuthenticated ? 'filter blur-[3px] select-none opacity-60 pointer-events-none' : ''}`}>
+        {/* Metrics Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Inngående penger</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.income || 184500)}</p>
-            <p className="text-xs text-stone-600 mt-1">Førte inntekter (Demo)</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.income)}</p>
+            <p className="text-xs text-stone-600 mt-1">Førte inntekter</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Utgående kostnader</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.expense || 42800)}</p>
-            <p className="text-xs text-stone-600 mt-1">Førte utgifter (Demo)</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{money(totals.expense)}</p>
+            <p className="text-xs text-stone-600 mt-1">Førte utgifter</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">MVA-estimat</p>
-            <p className="text-3xl font-serif text-bonde-green font-bold">{money(vat.estimated_settlement || 35420)}</p>
-            <p className="text-xs text-stone-600 mt-1">Utgående minus inngående (Demo)</p>
+            <p className="text-3xl font-serif text-bonde-green font-bold">{money(vat.estimated_settlement)}</p>
+            <p className="text-xs text-stone-600 mt-1">Utgående minus inngående</p>
           </Card>
 
           <Card hoverEffect={false} className="p-6 border-l-4 border-l-bonde-green bg-white">
             <p className="text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">Aktive bilag</p>
-            <p className="text-3xl font-serif text-stone-900 font-bold">{journalCount || 14}</p>
-            <p className="text-xs text-stone-600 mt-1">Registrerte bilag (Demo)</p>
+            <p className="text-3xl font-serif text-stone-900 font-bold">{journalCount}</p>
+            <p className="text-xs text-stone-600 mt-1">Registrerte bilag</p>
           </Card>
         </div>
 
-        {/* Demo info banner */}
-        <Card hoverEffect={false} className="p-8 border border-amber-200/80 bg-amber-50/60 rounded-2xl mb-10">
-          <div className="flex items-start space-x-4">
-            <span className="text-2xl">🌱</span>
-            <div>
-              <h3 className="text-base font-bold text-stone-900 uppercase tracking-wide mb-1">
-                Enkel flyt først
-              </h3>
-              <p className="text-sm text-stone-700 leading-relaxed">
-                Start med bilag: last opp, velg konto, før. Rapporter oppdateres automatisk når bilag føres.
-              </p>
+        {/* Empty state when no data */}
+        {!loading && !error && journalCount === 0 && (
+          <Card hoverEffect={false} className="p-8 border border-stone-200 bg-white rounded-2xl mb-10 text-center">
+            <span className="text-3xl mb-4 block">📄</span>
+            <h3 className="text-lg font-bold text-stone-900 mb-2">Ingen bilag registrert ennå</h3>
+            <p className="text-sm text-stone-600 mb-6 max-w-md mx-auto">
+              Last opp din første faktura for å komme i gang. OCR leser feltene automatisk, og du kontrollerer før bokføring.
+            </p>
+            <Button href="/bilag/new" variant="primary" showArrow>
+              LAST OPP FØRSTE BILAG
+            </Button>
+          </Card>
+        )}
+
+        {/* Info banner */}
+        {journalCount > 0 && (
+          <Card hoverEffect={false} className="p-8 border border-amber-200/80 bg-amber-50/60 rounded-2xl mb-10">
+            <div className="flex items-start space-x-4">
+              <span className="text-2xl">🌱</span>
+              <div>
+                <h3 className="text-base font-bold text-stone-900 uppercase tracking-wide mb-1">
+                  Enkel flyt først
+                </h3>
+                <p className="text-sm text-stone-700 leading-relaxed">
+                  Start med bilag: last opp, velg konto, før. Rapporter oppdateres automatisk når bilag føres.
+                </p>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        )}
       </main>
     </div>
   )
