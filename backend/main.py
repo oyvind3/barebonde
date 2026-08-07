@@ -53,7 +53,10 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS configuration
+# Handle JSON sent as string workaround - MUST be before CORS
+app.add_middleware(JSONStringMiddleware)
+
+# CORS configuration - MUST be after JSONStringMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -61,9 +64,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Handle JSON sent as string workaround
-app.add_middleware(JSONStringMiddleware)
 
 # Rate limiting - critical for production security
 setup_rate_limiting(app)
