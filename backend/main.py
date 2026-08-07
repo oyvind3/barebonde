@@ -10,6 +10,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.config import settings
+from app.api.routes import health, farms, accounting, auth, me, subscriptions, profile, onboarding, settings as farm_settings, invitations, customers, sales_invoices
+from app.middleware.rate_limiter import setup_rate_limiting
+
 
 class JSONStringMiddleware(BaseHTTPMiddleware):
     """Middleware to handle JSON sent as string in text/plain content-type.
