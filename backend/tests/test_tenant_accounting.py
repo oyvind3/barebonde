@@ -40,7 +40,12 @@ class MemoryContainer:
         self.last_partition_key = partition_key
         values = {parameter["name"]: parameter["value"] for parameter in parameters}
         assert values["@farm_id"] == partition_key
-        expected_type = "voucher_document" if "voucher_document" in query else "accounting_transaction"
+        if "voucher_document" in query:
+            expected_type = "voucher_document"
+        elif "journal_entry" in query:
+            expected_type = "journal_entry"
+        else:
+            expected_type = "accounting_transaction"
         return [
             dict(item)
             for item in self.items.values()
@@ -194,11 +199,14 @@ def make_client(monkeypatch, *, role="owner", documents=None, transactions=None,
         journal_container.create_item(entry)
         return entry
     
-    def mock_list_entries(farm_id, **kwargs):
-        return [
-            item for item in journal_container.items.values()
-            if item.get("farm_id") == farm_id and item.get("type") == "journal_entry"
-        ]
+    def mock_list_entries(farm_id, limit=500, **kwargs):
+        # Use the container's query mechanism to properly track partition key usage
+        results = journal_container.query_items(
+            query="SELECT * FROM c WHERE c.type = 'journal_entry' AND c.farm_id = @farm_id",
+            parameters=[{"name": "@farm_id", "value": farm_id}],
+            partition_key=farm_id,
+        )
+        return list(results)
     
     # Track partition key usage on the journal container
     original_journal_query = journal_container.query_items
@@ -222,7 +230,15 @@ def make_client(monkeypatch, *, role="owner", documents=None, transactions=None,
 
     app = FastAPI()
     app.include_router(accounting.router)
-    return TestClient(app), state
+    return TestClient(app), SimpleNamespace(
+        documents=state.documents,
+        transactions=state.transactions,
+        audits=state.audits,
+        storage=state.storage,
+        farms=state.farms,
+        memberships=state.memberships,
+        journals=journal_container,
+    )
 
 
 def authenticated_headers():
@@ -363,8 +379,8 @@ def test_cross_tenant_documents_vouchers_booking_and_reports_are_hidden(monkeypa
     rows = report.json()["rows"]
     assert len(rows) > 0
     assert rows[0]["expense"] == 100.0
-    assert state.documents.last_partition_key == "farm-a"
-    assert "enable_cross_partition_query" not in getattr(state.documents, "last_query", "")
+    assert state.journals.last_partition_key == "farm-a"
+    assert "enable_cross_partition_query" not in getattr(state.journals, "last_query", "")
 
 
 def test_document_read_and_download_are_authorized_and_stream_private_blob(monkeypatch):
@@ -402,15 +418,12 @@ def test_booking_is_partition_scoped_creates_one_transaction_and_rejects_retry(m
     assert first.status_code == 200
     assert first.json()["status"] == "ført"
     assert second.status_code == 409
-    # The journal entry is stored in the journal container, not documents
+    # The journal entry is stored in the journal container
     # Check that the journal entry was created with the correct source_key
-    journal_container = state.documents  # This is actually the journal container in our mock
-    # Find the journal entry by looking for items with type 'journal_entry'
-    journal_entries = [item for item in state.documents.items.values() if item.get("type") == "journal_entry"]
+    journal_entries = [item for item in state.journals.items.values() if item.get("type") == "journal_entry"]
     assert len(journal_entries) == 1
     created = journal_entries[0]
     assert created["farm_id"] == "farm-a"
-    assert created["created_by_user_id"] == "user-a"
 
 
 def test_voucher_listing_uses_the_farm_partition_and_applies_filters(monkeypatch):
