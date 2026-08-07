@@ -7,6 +7,7 @@ use Decimal with explicit rounding, and totals are always recomputed server-side
 from __future__ import annotations
 
 import base64
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -38,6 +39,8 @@ from app.services.sales_invoice_pdf import build_invoice_pdf
 from app.services.storage_service import StorageService
 
 router = APIRouter()
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 IMMUTABLE_STATUSES = {"issued", "sent", "paid", "cancelled"}
 UNIT_CHOICES = {"stk", "time", "kg", "liter", "daa", "oppdrag"}
@@ -387,6 +390,14 @@ def _validate_issue(document: dict, farm: dict) -> tuple[dict, dict, dict]:
 
     if int(document.get("total_ore") or 0) <= 0:
         errors.append("Fakturatotalen må være større enn 0.")
+
+    # Validate customer email before issuing (required for sending invoice)
+    if customer:
+        customer_email = customer.get("email") or ""
+        if not customer_email.strip():
+            errors.append("Kunden mangler e-postadresse (se Kunde).")
+        elif not EMAIL_PATTERN.match(customer_email.strip()):
+            errors.append("Kundens e-postadresse er ugyldig.")
 
     if errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=errors)
