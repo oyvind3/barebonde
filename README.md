@@ -2,7 +2,7 @@
 
 Barebonde er en modulær plattform for norske gårdsbruk og landbruksforetak. Løsningen utvikles rundt gårdsoversikt, regnskap og bilag, dokumenter, frister, ressurser og drift.
 
-**Status**: MVP-fase med identitet, medlemskap, abonnement, tenant-isolasjon og bilagskontroll (opplasting, OCR, korrigering og bokføring) implementert.
+**Status**: MVP-fase med identitet, medlemskap, abonnement, tenant-isolasjon, bilagskontroll (opplasting, OCR, korrigering og bokføring) og salgsfaktura (kunde, utkast, PDF, e-post og manuell betalingsstatus) implementert.
 
 ## Dagens løsning
 
@@ -94,6 +94,7 @@ docs/architecture/       Arkitekturbeslutninger
 - [Identity-MVP](./docs/IDENTITY.md)
 - [Farm-medlemskap og tenant-isolasjon](./docs/FARM_MEMBERSHIP.md)
 - [Tenant-sikring av regnskap og dokumenter](./docs/TENANT_ACCOUNTING.md)
+- [Salgsfaktura](./docs/SALES_INVOICES.md)
 - [Abonnement og entitlements](./docs/SUBSCRIPTIONS.md)
 - [Release gate](./docs/RELEASE_GATE.md)
 - [Smoke tests](./docs/SMOKE_TESTS.md)
@@ -108,4 +109,4 @@ Prosjektet utvikles for norske gårdsbruk og landbruksforetak. Se produktbacklog
 
 ## Neste planlagte fase
 
-`Kontrollert håndtering av legacy-dokumenter med blob_url`.
+Epic 4 kobler kjøpsbilag og salgsfaktura til en ordentlig journal/debet-kredit-modell. Salgsfaktura er i dag et eget domeneobjekt uten automatisk bokføring.

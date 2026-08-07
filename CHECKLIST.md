@@ -25,6 +25,9 @@
 - [x] OCR label-scoring med norske etiketter, formatvalidering, checksum og matematisk konsistens.
 - [x] Onboarding: 4 steg (bedrift, produksjon, kontakt, e-postbekreftelse) – fjernet betalingsvalg og interesser.
 - [x] Pilotdokumentasjon: RELEASE_GATE.md, SMOKE_TESTS.md og STAGING_SETUP.md.
+- [x] Salgsfaktura (Epic 3): farm-scoped kunder og fakturaer, BRREG-prefill, utkast med linjer, backend-autoritativ beregning, concurrency-sikkert fakturanummer, immutable snapshots, ReportLab-PDF i privat Blob, Plunk-utsending med idempotency og manuell «marker betalt».
+- [ ] Automatisk bokføring av salgsfaktura (Epic 4).
+- [ ] EHF/Peppol for salgsfaktura.
 - [ ] Sikkerhetsgjennomgang og penetrasjonstest.
 - [ ] Korrigeringsflyt for bokførte bilag (reversering/kreditnota).
 

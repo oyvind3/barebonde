@@ -1,6 +1,6 @@
 # Barebonde – statusrapport
 
-**Oppdatert:** 8. juli 2026 (Epic 2 – fortsettelse fullført)
+**Oppdatert:** 8. juli 2026 (Epic 3 – Salgsfaktura fullført)
 **Status:** Eksisterende løsning er i aktiv utvikling; dette dokumentet beskriver verifiserbar repository-status, ikke en produksjonsgodkjenning.
 
 ## Aktiv arkitektur
@@ -26,13 +26,17 @@ OCR-feltutvinning (`backend/app/services/invoice_field_parser.py` og `ocr_servic
 
 Cosmos DB er den faktiske datalagringen. SQLAlchemy, PostgreSQL, Better Auth, ID-porten og Ory/Kratos er ikke aktive deler av dagens arkitektur.
 
+## Salgsfaktura (Epic 3)
+
+Salgsfakturaflyten er implementert: kunde (manuelt eller BRREG-prefill), fakturautkast med linjer, backend-autoritativ beregning (heltall i øre, `Decimal`, `ROUND_HALF_UP`), utstedelse med concurrency-sikkert fakturanummer (`ÅÅÅÅ-NNNN`) og immutable seller/customer/payment-snapshots, ReportLab-PDF (utkast merket `UTKAST`, permanent PDF i privat Blob med autorisert streaming), Plunk-e-post med PDF-vedlegg og idempotency-key, samt manuell «marker betalt». Statusmodellen er `draft → issued → sent → paid` med `cancelled` kun for utkast; utstedte fakturaer er immutable. Nye Cosmos-containere `customers` og `sales_invoices` (partition key `/farm_id`) er registrert i `cosmos_schema.py` og bootstrap-skriptet. Nye permissions: `customer.read/create/update` og `sales_invoice.read/create/update/issue/send/mark_paid`; staff har kun lesetilgang. `paid` er en manuell status uten bokføring – automatisk kobling til journal kommer i Epic 4. EHF/Peppol er ikke implementert. Se [Salgsfaktura](./docs/SALES_INVOICES.md).
+
 ## Subscription og entitlements
 
 Hver Farm har ett idempotent `subscriptions`-dokument med en statisk, versjonert plan: `free`, `standard` eller `premium`. Nye Farms får `free` før de aktiveres, og `/api/me` initialiserer bare aktiv eksisterende Farm lazily. `report_liquidity` er første avanserte rapport og krever både rollepermission og `reports.advanced.enabled`; måneds-, MVA-, tilskudds- og journalrapportene forblir grunnrapporter på `free`. Usage og betaling er ikke implementert.
 
 ## Neste arbeid
 
-1. Kontrollert håndtering av legacy-dokumenter med `blob_url`.
+1. Epic 4: kobling av kjøpsbilag og salgsfaktura til journal/debet-kredit.
 2. Rate limiting og sikkerhetsgjennomgang av Identity før bred produksjonsbruk.
 
 Se [Release gate](./docs/RELEASE_GATE.md), [Smoke tests](./docs/SMOKE_TESTS.md) og [Staging-oppsett](./docs/STAGING_SETUP.md) for pilotgrunnlag.
