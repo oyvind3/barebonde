@@ -74,11 +74,28 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) {
     headers.set('X-CSRF-Token', csrfToken)
   }
+  // Set Content-Type: application/json for JSON string bodies if not already set
+  // Do not set for FormData, Blob, File, or multipart
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && init.body != null) {
+    const hasContentType = headers.has('Content-Type')
+    if (!hasContentType && typeof init.body === 'string') {
+      headers.set('Content-Type', 'application/json')
+    }
+  }
   return fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include' })
 }
 
 export async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
   const payload = await response.json().catch(() => ({})) as { detail?: unknown }
+  // Handle FastAPI 422 array errors
+  if (Array.isArray(payload.detail) && payload.detail.length > 0) {
+    const messages = payload.detail
+      .filter((item): item is { msg: string } => typeof item === 'object' && item !== null && 'msg' in item)
+      .map((item) => item.msg)
+    if (messages.length > 0) {
+      return messages.join('. ')
+    }
+  }
   if (typeof payload.detail === 'string' && payload.detail) return payload.detail
   if (response.status === 401) return 'Logg inn for å fortsette.'
   if (response.status === 403) return 'Du har ikke rollen som kreves for denne handlingen.'
