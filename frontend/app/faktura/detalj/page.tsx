@@ -52,6 +52,9 @@ type Invoice = {
   sent_at: string | null
   paid_at: string | null
   delivery: Delivery
+  accounting_status: string
+  accounting_last_error: string | null
+  issue_journal_number: string | null
 }
 
 const STATUS_LABELS: Record<string, string> = {

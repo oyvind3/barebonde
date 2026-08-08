@@ -222,6 +222,10 @@ function NyFakturaPageInner() {
       vat_rate: line.vat_rate,
     }))
 
+  const normalizeOrgNumber = (value: string): string => {
+    return value.replace(/[.\s]/g, '')
+  }
+
   const ensureCustomer = async (): Promise<string> => {
     if (status === 'loading') throw new Error('Laster identitet ...')
     if (!farmId) throw new Error('Ingen aktiv gård er valgt.')
@@ -230,22 +234,60 @@ function NyFakturaPageInner() {
       return selectedCustomerId
     }
     if (!newCustomer.name.trim()) throw new Error('Kunden mangler navn.')
-    const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/customers`, {
-      method: 'POST',
-      body: JSON.stringify({
-        name: newCustomer.name.trim(),
-        org_number: newCustomer.org_number || null,
-        email: newCustomer.email || null,
-        address: newCustomer.address || null,
-        postal_code: newCustomer.postal_code || null,
-        city: newCustomer.city || null,
-        country_code: 'NO',
-        brreg_verified: Boolean(newCustomer.org_number),
-      }),
-    })
-    if (!response.ok) throw new Error(await apiErrorMessage(response, 'Kunne ikke opprette kunden.'))
-    const created = await response.json()
-    return created.id
+    
+    // Check if an existing customer with the same org_number already exists
+    const normalizedOrgNumber = normalizeOrgNumber(newCustomer.org_number || '')
+    if (normalizedOrgNumber.length > 0) {
+      const existingCustomer = customers.find(
+        (c) => normalizeOrgNumber(c.org_number || '') === normalizedOrgNumber
+      )
+      if (existingCustomer) {
+        setSelectedCustomerId(existingCustomer.id)
+        setCustomerMode('existing')
+        return existingCustomer.id
+      }
+    }
+    
+    try {
+      const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/customers`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newCustomer.name.trim(),
+          org_number: newCustomer.org_number || null,
+          email: newCustomer.email || null,
+          address: newCustomer.address || null,
+          postal_code: newCustomer.postal_code || null,
+          city: newCustomer.city || null,
+          country_code: 'NO',
+          brreg_verified: Boolean(newCustomer.org_number),
+        }),
+      })
+      if (!response.ok) {
+        if (response.status === 409 && normalizedOrgNumber.length > 0) {
+          // Fetch updated customer list and find the existing customer
+          const refreshResponse = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/customers`)
+          if (refreshResponse.ok) {
+            const data = await refreshResponse.json()
+            const refreshedCustomers = data.customers || []
+            const existingCustomer = refreshedCustomers.find(
+              (c: Customer) => normalizeOrgNumber(c.org_number || '') === normalizedOrgNumber
+            )
+            if (existingCustomer) {
+              setCustomers(refreshedCustomers)
+              setSelectedCustomerId(existingCustomer.id)
+              setCustomerMode('existing')
+              return existingCustomer.id
+            }
+          }
+        }
+        throw new Error(await apiErrorMessage(response, 'Kunne ikke opprette kunden.'))
+      }
+      const created = await response.json()
+      setCustomers((prev) => [...prev, created])
+      return created.id
+    } catch (err) {
+      throw err
+    }
   }
 
   const saveDraft = async (): Promise<string | null> => {
@@ -336,7 +378,25 @@ function NyFakturaPageInner() {
       const response = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/sales-invoices/${encodeURIComponent(id)}/issue`, {
         method: 'POST',
       })
-      if (!response.ok) throw new Error(await apiErrorMessage(response, 'Kunne ikke utstede fakturaen.'))
+      if (!response.ok) {
+        // On 503, the invoice may already be issued with accounting_status=error.
+        // Refetch to get the actual persisted state.
+        if (response.status === 503) {
+          try {
+            const refetchResponse = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/sales-invoices/${encodeURIComponent(id)}`)
+            if (refetchResponse.ok) {
+              const invoice = await refetchResponse.json()
+              if (invoice.status === 'issued' && invoice.accounting_status === 'error') {
+                router.push(`/faktura/detalj?id=${encodeURIComponent(id)}&issued=1`)
+                return
+              }
+            }
+          } catch {
+            // Ignore refetch error, show original error
+          }
+        }
+        throw new Error(await apiErrorMessage(response, 'Kunne ikke utstede fakturaen.'))
+      }
       router.push(`/faktura/detalj?id=${encodeURIComponent(id)}&issued=1`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Kunne ikke utstede fakturaen.')
