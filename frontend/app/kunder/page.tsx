@@ -5,9 +5,8 @@ import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { apiErrorMessage, apiFetch, bootstrapIdentity } from '@/lib/api'
-
-const FARM_ID_KEY = 'barebonde_active_farm_id'
+import { apiErrorMessage, apiFetch } from '@/lib/api'
+import { useIdentity } from '@/lib/identity'
 
 type Customer = {
   id: string
@@ -28,7 +27,8 @@ type BrregResult = {
 }
 
 export default function KunderPage() {
-  const [farmId, setFarmId] = useState('')
+  const { status, activeFarm } = useIdentity()
+  const farmId = activeFarm?.id || ''
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -44,14 +44,12 @@ export default function KunderPage() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    bootstrapIdentity(storedFarmId)
-      .then((identity) => setFarmId(identity?.active_farm?.id || ''))
-      .catch(() => setError('Kunne ikke hente den aktive gården.'))
-  }, [])
-
-  useEffect(() => {
-    if (!farmId) return
+    if (status === 'loading') return
+    if (!farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      setLoading(false)
+      return
+    }
     const fetchCustomers = async () => {
       setLoading(true)
       try {
@@ -66,7 +64,7 @@ export default function KunderPage() {
       }
     }
     fetchCustomers()
-  }, [farmId])
+  }, [farmId, status])
 
   const filtered = customers.filter((customer) => {
     const q = search.trim().toLowerCase()
@@ -80,7 +78,12 @@ export default function KunderPage() {
   })
 
   const searchBrreg = async () => {
-    if (!farmId || brregQuery.trim().length < 2) return
+    if (status === 'loading') return
+    if (!farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      return
+    }
+    if (brregQuery.trim().length < 2) return
     setBrregSearching(true)
     setBrregResults([])
     try {
@@ -103,7 +106,11 @@ export default function KunderPage() {
   }
 
   const saveCustomer = async () => {
-    if (!farmId) return
+    if (status === 'loading') return
+    if (!farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      return
+    }
     if (!form.name.trim()) {
       setError('Kunden mangler navn.')
       return
@@ -249,7 +256,7 @@ export default function KunderPage() {
               </div>
             </div>
             <div className="mt-4 flex justify-end">
-              <Button onClick={saveCustomer} disabled={saving}>
+              <Button type="button" onClick={saveCustomer} disabled={saving || status === 'loading' || !farmId}>
                 {saving ? 'Lagrer …' : editingId ? 'Lagre endringer' : 'Opprett kunde'}
               </Button>
             </div>

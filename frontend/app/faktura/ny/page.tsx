@@ -6,9 +6,8 @@ import Link from 'next/link'
 import { Navbar } from '@/components/navigation/Navbar'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { apiErrorMessage, apiFetch, bootstrapIdentity } from '@/lib/api'
-
-const FARM_ID_KEY = 'barebonde_active_farm_id'
+import { apiErrorMessage, apiFetch } from '@/lib/api'
+import { useIdentity } from '@/lib/identity'
 
 const UNIT_CHOICES = ['stk', 'time', 'kg', 'liter', 'daa', 'oppdrag']
 const VAT_CHOICES = [0, 12, 15, 25]
@@ -74,7 +73,8 @@ function NyFakturaPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const editId = searchParams.get('id') || ''
-  const [farmId, setFarmId] = useState('')
+  const { status, activeFarm } = useIdentity()
+  const farmId = activeFarm?.id || ''
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -102,14 +102,12 @@ function NyFakturaPageInner() {
   const [issuing, setIssuing] = useState(false)
 
   useEffect(() => {
-    const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
-    bootstrapIdentity(storedFarmId)
-      .then((identity) => setFarmId(identity?.active_farm?.id || ''))
-      .catch(() => setError('Kunne ikke hente den aktive gården.'))
-  }, [])
-
-  useEffect(() => {
-    if (!farmId) return
+    if (status === 'loading') return
+    if (!farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      setLoading(false)
+      return
+    }
     const fetchData = async () => {
       setLoading(true)
       try {
@@ -152,7 +150,7 @@ function NyFakturaPageInner() {
       }
     }
     fetchData()
-  }, [farmId, editId])
+  }, [farmId, status, editId])
 
   const totals = useMemo(() => {
     let subtotal = 0
@@ -178,7 +176,12 @@ function NyFakturaPageInner() {
   }
 
   const searchBrreg = async () => {
-    if (!farmId || brregQuery.trim().length < 2) return
+    if (status === 'loading') return
+    if (!farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      return
+    }
+    if (brregQuery.trim().length < 2) return
     setBrregSearching(true)
     setBrregError('')
     setBrregResults([])
@@ -220,6 +223,8 @@ function NyFakturaPageInner() {
     }))
 
   const ensureCustomer = async (): Promise<string> => {
+    if (status === 'loading') throw new Error('Laster identitet ...')
+    if (!farmId) throw new Error('Ingen aktiv gård er valgt.')
     if (customerMode === 'existing') {
       if (!selectedCustomerId) throw new Error('Velg en kunde.')
       return selectedCustomerId
@@ -244,9 +249,13 @@ function NyFakturaPageInner() {
   }
 
   const saveDraft = async (): Promise<string | null> => {
+    if (status === 'loading') return null
+    if (!farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      return null
+    }
     setError('')
     setSuccess('')
-    if (!farmId) return null
     if (dueDate < invoiceDate) {
       setError('Forfallsdato kan ikke være før fakturadato.')
       return null
@@ -290,8 +299,12 @@ function NyFakturaPageInner() {
   }
 
   const previewPdf = async () => {
+    if (status === 'loading') return
     const id = invoiceId || (await saveDraft())
-    if (!id || !farmId) return
+    if (!id || !farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      return
+    }
     setPreviewing(true)
     setError('')
     try {
@@ -311,8 +324,12 @@ function NyFakturaPageInner() {
   }
 
   const issueInvoice = async () => {
+    if (status === 'loading') return
     const id = invoiceId || (await saveDraft())
-    if (!id || !farmId) return
+    if (!id || !farmId) {
+      setError('Ingen aktiv gård er valgt.')
+      return
+    }
     setIssuing(true)
     setError('')
     try {
@@ -579,13 +596,13 @@ function NyFakturaPageInner() {
           </Card>
 
           <div className="flex flex-wrap justify-end gap-3">
-            <Button variant="secondary" onClick={saveDraft} disabled={saving || previewing || issuing}>
+            <Button type="button" variant="secondary" onClick={saveDraft} disabled={saving || previewing || issuing || status === 'loading' || !farmId}>
               {saving ? 'Lagrer …' : invoiceId ? 'Lagre utkast' : 'Lagre utkast'}
             </Button>
-            <Button variant="secondary" onClick={previewPdf} disabled={saving || previewing || issuing}>
+            <Button type="button" variant="secondary" onClick={previewPdf} disabled={saving || previewing || issuing || status === 'loading' || !farmId}>
               {previewing ? 'Genererer …' : 'Forhåndsvis PDF'}
             </Button>
-            <Button onClick={issueInvoice} disabled={saving || previewing || issuing}>
+            <Button type="button" onClick={issueInvoice} disabled={saving || previewing || issuing || status === 'loading' || !farmId}>
               {issuing ? 'Utsteder …' : 'Utsted faktura'}
             </Button>
           </div>
