@@ -186,7 +186,7 @@ export default function KunderPage() {
             <Link href="/faktura" className="text-sm font-semibold text-bonde-green hover:underline">
               ← Til fakturaer
             </Link>
-            <Button onClick={() => { setShowNew((prev) => !prev); setEditingId(''); setForm({ name: '', org_number: '', email: '', address: '', postal_code: '', city: '' }) }}>
+            <Button onClick={() => { setShowNew((prev) => !prev); setEditingId(''); setForm({ name: '', org_number: '', email: '', phone: '', address: '', postal_code: '', city: '' }) }}>
               {showNew ? 'Lukk' : 'Ny kunde'}
             </Button>
           </div>

@@ -17,6 +17,10 @@ type Customer = {
   name: string
   org_number: string
   email: string
+  phone: string
+  address: string
+  postal_code: string
+  city: string
 }
 
 type BrregResult = {
