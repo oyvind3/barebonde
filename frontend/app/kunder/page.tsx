@@ -13,6 +13,7 @@ type Customer = {
   name: string
   org_number: string
   email: string
+  phone: string
   address: string
   postal_code: string
   city: string
@@ -37,7 +38,7 @@ export default function KunderPage() {
   const [showNew, setShowNew] = useState(false)
   const [editingId, setEditingId] = useState('')
 
-  const [form, setForm] = useState({ name: '', org_number: '', email: '', address: '', postal_code: '', city: '' })
+  const [form, setForm] = useState({ name: '', org_number: '', email: '', phone: '', address: '', postal_code: '', city: '' })
   const [brregQuery, setBrregQuery] = useState('')
   const [brregResults, setBrregResults] = useState<BrregResult[]>([])
   const [brregSearching, setBrregSearching] = useState(false)
@@ -101,7 +102,7 @@ export default function KunderPage() {
   }
 
   const pickBrregResult = (result: BrregResult) => {
-    setForm({ name: result.name, org_number: result.org_number, email: '', address: result.address, postal_code: result.postal_code, city: result.city })
+    setForm({ name: result.name, org_number: result.org_number, email: '', phone: '', address: result.address, postal_code: result.postal_code, city: result.city })
     setBrregResults([])
   }
 
@@ -123,6 +124,7 @@ export default function KunderPage() {
         name: form.name.trim(),
         org_number: form.org_number || null,
         email: form.email || null,
+        phone: form.phone || null,
         address: form.address || null,
         postal_code: form.postal_code || null,
         city: form.city || null,
@@ -144,7 +146,7 @@ export default function KunderPage() {
       setSuccess(editingId ? 'Kunden er oppdatert.' : 'Kunden er opprettet.')
       setShowNew(false)
       setEditingId('')
-      setForm({ name: '', org_number: '', email: '', address: '', postal_code: '', city: '' })
+      setForm({ name: '', org_number: '', email: '', phone: '', address: '', postal_code: '', city: '' })
       const listResponse = await apiFetch(`/api/farms/${encodeURIComponent(farmId)}/customers`)
       if (listResponse.ok) {
         const data = await listResponse.json()
@@ -164,6 +166,7 @@ export default function KunderPage() {
       name: customer.name,
       org_number: customer.org_number || '',
       email: customer.email || '',
+      phone: customer.phone || '',
       address: customer.address || '',
       postal_code: customer.postal_code || '',
       city: customer.city || '',
@@ -243,6 +246,10 @@ export default function KunderPage() {
                 <input type="email" value={form.email} onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
               </div>
               <div>
+                <label className="mb-1 block text-sm font-medium text-stone-700">Telefon</label>
+                <input type="tel" value={form.phone} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
                 <label className="mb-1 block text-sm font-medium text-stone-700">Adresse</label>
                 <input value={form.address} onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
               </div>
@@ -282,6 +289,7 @@ export default function KunderPage() {
                     <th className="px-4 py-3">Navn</th>
                     <th className="px-4 py-3">Org.nr.</th>
                     <th className="px-4 py-3">E-post</th>
+                    <th className="px-4 py-3">Telefon</th>
                     <th className="px-4 py-3">Sted</th>
                     <th className="px-4 py-3" />
                   </tr>
@@ -292,6 +300,7 @@ export default function KunderPage() {
                       <td className="px-4 py-3 font-medium text-stone-900">{customer.name}</td>
                       <td className="px-4 py-3 text-stone-600">{customer.org_number || '–'}</td>
                       <td className="px-4 py-3 text-stone-600">{customer.email || '–'}</td>
+                      <td className="px-4 py-3 text-stone-600">{customer.phone || '–'}</td>
                       <td className="px-4 py-3 text-stone-600">{customer.city || '–'}</td>
                       <td className="px-4 py-3 text-right">
                         <button type="button" onClick={() => startEdit(customer)} className="text-sm font-semibold text-bonde-green hover:underline">
