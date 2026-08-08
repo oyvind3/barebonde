@@ -923,3 +923,30 @@ def mark_sales_invoice_paid(
             # Invoice stays paid; payment posting can be retried via reconciliation.
             pass
     return _invoice_response(document)
+
+
+# ---------------------------------------------------------------------------
+# Delete draft invoice
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/farms/{farm_id}/sales-invoices/{invoice_id}")
+def delete_sales_invoice(
+    invoice_id: str,
+    access: AuthorizedFarm = Depends(require_farm_permission(Permission.SALES_INVOICE_UPDATE, require_csrf_protection=True)),
+) -> dict:
+    """Delete a sales invoice draft. Only invoices with status='draft' can be deleted."""
+    farm_id = str(access.farm["id"])
+    container = get_sales_invoices_container()
+    document = _read_invoice(farm_id, invoice_id)
+    
+    if document.get("status") != "draft":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Kun utkast kan slettes. Utstedte fakturaer kan ikke slettes.",
+        )
+    
+    # Delete the draft document
+    container.delete_item(document, partition_key=farm_id)
+    
+    return {"message": "Fakturautkastet er slettet."}

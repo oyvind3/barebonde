@@ -57,6 +57,7 @@ class CustomerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     org_number: Optional[str] = Field(default=None, max_length=20)
     email: Optional[str] = Field(default=None, max_length=254)
+    phone: Optional[str] = Field(default=None, max_length=30)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
     city: Optional[str] = Field(default=None, max_length=100)
@@ -68,6 +69,7 @@ class CustomerPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=160)
     org_number: Optional[str] = Field(default=None, max_length=20)
     email: Optional[str] = Field(default=None, max_length=254)
+    phone: Optional[str] = Field(default=None, max_length=30)
     address: Optional[str] = Field(default=None, max_length=160)
     postal_code: Optional[str] = Field(default=None, max_length=10)
     city: Optional[str] = Field(default=None, max_length=100)
@@ -80,6 +82,7 @@ def _customer_response(item: dict) -> dict:
         "name": item.get("name") or "",
         "org_number": item.get("org_number") or "",
         "email": item.get("email") or "",
+        "phone": item.get("phone") or "",
         "address": item.get("address") or "",
         "postal_code": item.get("postal_code") or "",
         "city": item.get("city") or "",
@@ -194,6 +197,7 @@ def create_customer(
         "name": name,
         "org_number": org_number,
         "email": email,
+        "phone": (request.phone or "").strip(),
         "address": (request.address or "").strip(),
         "postal_code": (request.postal_code or "").strip(),
         "city": (request.city or "").strip(),
@@ -263,6 +267,10 @@ def patch_customer(
                 detail="E-postadressen er ugyldig.",
             )
         document["email"] = email_raw
+
+    if "phone" in updates:
+        phone_raw = (updates.pop("phone") or "").strip()
+        document["phone"] = phone_raw
 
     if "name" in updates:
         name = (updates.pop("name") or "").strip()
