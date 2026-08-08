@@ -38,9 +38,9 @@ type Invoice = {
   invoice_date: string
   due_date: string
   customer_id: string
-  customer_snapshot: Record<string, string> | null
-  seller_snapshot: Record<string, string> | null
-  payment_account_snapshot: Record<string, string> | null
+  customer_snapshot: Record<string, string | null> | null
+  seller_snapshot: Record<string, string | null> | null
+  payment_account_snapshot: Record<string, string | null> | null
   lines: InvoiceLine[]
   subtotal_ore: number
   vat_total_ore: number
@@ -98,6 +98,9 @@ function FakturaDetaljPageInner() {
   const [success, setSuccess] = useState(justIssued ? 'Fakturaen er utstedt.' : '')
   const [busy, setBusy] = useState<'' | 'send' | 'resend' | 'paid' | 'cancel' | 'pdf'>('')
 
+  const [pdfUrl, setPdfUrl] = useState('')
+  const [showPdf, setShowPdf] = useState(false)
+
   const loadInvoice = useCallback(async (activeFarmId: string) => {
     if (!activeFarmId || !invoiceId) return
     setLoading(true)
@@ -120,6 +123,12 @@ function FakturaDetaljPageInner() {
       setLoading(false)
     }
   }, [invoiceId])
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl)
+    }
+  }, [pdfUrl])
 
   useEffect(() => {
     const storedFarmId = window.localStorage.getItem(FARM_ID_KEY) || ''
@@ -154,7 +163,7 @@ function FakturaDetaljPageInner() {
     }
   }
 
-  const openPdf = async (mode: 'preview' | 'download') => {
+  const openPdf = async (mode: 'preview' | 'download' | 'embed') => {
     if (!farmId || !invoiceId) return
     setBusy('pdf')
     setError('')
@@ -179,8 +188,13 @@ function FakturaDetaljPageInner() {
           return
         }
       }
-      window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60000)
+      if (mode === 'embed') {
+        setPdfUrl(url)
+        setShowPdf(true)
+      } else {
+        window.open(url, '_blank')
+        setTimeout(() => URL.revokeObjectURL(url), 60000)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Kunne ikke hente PDF.')
     } finally {
@@ -279,7 +293,20 @@ function FakturaDetaljPageInner() {
                   {(invoice.customer_snapshot?.postal_code || invoice.customer_snapshot?.city) && (
                     <p className="text-sm text-stone-600">{invoice.customer_snapshot.postal_code} {invoice.customer_snapshot.city}</p>
                   )}
-                  {invoice.customer_snapshot?.email && <p className="text-sm text-stone-600">{invoice.customer_snapshot.email}</p>}
+                  {invoice.customer_snapshot?.email && (
+                    <p className="mt-2 text-sm">
+                      <a href={`mailto:${invoice.customer_snapshot.email}`} className="text-bonde-green hover:underline">
+                        {invoice.customer_snapshot.email}
+                      </a>
+                    </p>
+                  )}
+                  {invoice.customer_snapshot?.phone && (
+                    <p className="mt-1 text-sm">
+                      <a href={`tel:${invoice.customer_snapshot.phone}`} className="text-bonde-green hover:underline">
+                        {invoice.customer_snapshot.phone}
+                      </a>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Selger</h3>
